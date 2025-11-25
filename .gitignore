@@ -208,3 +208,4 @@ __marimo__/
 documentation/
 backend/webserviceApp
 backend/app/creds.json
+backend/app/confluent-api-key.txt
