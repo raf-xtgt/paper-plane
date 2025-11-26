@@ -1,4 +1,5 @@
 import json
+import asyncio
 from app.util.confluent.confluent_config import *
 from app.util.confluent.confluent_helper import *
 from confluent_kafka import Consumer, KafkaError
@@ -34,8 +35,11 @@ async def consume_inbound():
             print(f"\n[INBOUND EVENT RECEIVED]: From {data.get('from')}: {data.get('body')}\n")
             
             await asyncio.sleep(0.01) # Yield control
+    except asyncio.CancelledError:
+        print("Inbound consumer shutting down...")
     finally:
         consumer.close()
+        print("Inbound consumer closed")
 
 async def consume_outbound():
     """
@@ -79,5 +83,8 @@ async def consume_outbound():
                 print(f"Failed to send via Twilio: {e}")
 
             await asyncio.sleep(0.01)
+    except asyncio.CancelledError:
+        print("Outbound consumer shutting down...")
     finally:
         consumer.close()
+        print("Outbound consumer closed")
