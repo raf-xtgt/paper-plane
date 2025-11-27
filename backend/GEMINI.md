@@ -510,7 +510,104 @@ class OutreachDraft(BaseModel):
 - Failed Kafka publishes are written to `backend/app/util/confluent/fallback_queue/`
 - Timestamped JSON files for manual recovery
 - Retry logic: 3 attempts with exponential backoff (1s, 2s, 4s)
-## **6\. Development Setup & Usage**
+
+
+## **6\. Architecture & File Organization
+
+## Directory Structure
+
+```
+backend/app/
+├── controller/agents/
+│   └── lead_gen_controller.py      # REST API endpoint
+├── service/agents/
+│   ├── lead_gen_service.py         # Pipeline orchestration
+│   ├── scout_agent.py              # Gemini Flash - Discovery
+│   ├── researcher_agent.py         # Gemini Flash - Enrichment
+│   └── strategist_agent.py         # Gemini Pro - Message generation
+├── model/
+│   └── lead_gen_model.py           # Pydantic schemas
+└── util/
+    ├── agents/
+    │   └── adk_config.py           # Environment config
+    └── confluent/
+        ├── lead_gen_producer.py    # Kafka publisher
+        └── lead_gen_listener.py    # Kafka consumer
+```
+
+## Architecture Pattern: Event-Driven Layered
+
+**Event-Driven Core**: All message flows use Kafka as the central event bus. Controllers produce events immediately and return. Background consumers process events asynchronously.
+
+**Layer Responsibilities**:
+- **Controllers**: HTTP only - validate input, produce Kafka event or call service, return response. Zero business logic.
+- **Services**: Business logic, orchestration, external API calls, agent coordination.
+- **Utils**: External client initialization, Kafka producers/consumers, helper functions.
+
+**Async Lifecycle**: `app/main.py` uses FastAPI lifespan context manager to start Kafka consumers on startup and gracefully shut down on exit.
+
+## Kafka Topics
+
+- `whatsapp_inbound` - Incoming messages from Twilio webhook
+- `whatsapp_outbound` - Outgoing messages to send via Twilio
+- `lead_gen_requests` - Lead generation job triggers
+- `lead_gen_results` - Completed lead generation outputs
+
+## File Naming Convention
+
+Follow these patterns strictly:
+
+- `app/controller/<service>/<service>_controller.py` - FastAPI router
+- `app/model/<entity>_model.py` - Pydantic schemas
+- `app/service/<domain>/<entity>_service.py` - Business logic
+- `app/util/<service>/<service>_config.py` - Client initialization
+- `app/util/<service>/<service>_helper.py` - Utility functions
+- `app/util/<service>/<entity>_listener.py` - Kafka consumer
+- `app/util/<service>/<entity>_producer.py` - Kafka producer
+
+## Layer-Specific Rules
+
+**Controllers** (`controller/`):
+- Use FastAPI `APIRouter` with prefix and tags
+- Keep handlers thin (3-10 lines typical)
+- Validate input with Pydantic models
+- Produce Kafka event or call service function
+- Return response immediately - never wait for Kafka processing
+- No business logic, no external API calls
+
+**Models** (`model/`):
+- Use Pydantic `BaseModel` for all API schemas
+- Include field validation, defaults, and examples
+- One file per domain entity
+
+**Services** (`service/`):
+- Contain all business logic and orchestration
+- Call external APIs, coordinate agents, process data
+- Can be called directly by controllers or Kafka consumers
+- Use async/await for all I/O operations
+
+**Utils** (`util/`):
+- `*_config.py`: Load env vars, initialize clients (Kafka, Twilio, Vertex AI), export singleton instances
+- `*_listener.py`: Background Kafka consumers that run in FastAPI lifespan
+- `*_producer.py`: Functions to produce messages to Kafka topics
+- `*_helper.py`: Reusable utility functions
+
+**Main Application** (`app/main.py`):
+- Initialize FastAPI app
+- Register all routers with `/api/ppl` prefix
+- Configure CORS for frontend
+- Set up lifespan manager to start/stop Kafka consumers
+
+## Critical Rules
+
+- Never initialize external clients in controllers or services - always import from `*_config.py`
+- Never block HTTP responses waiting for Kafka processing - produce event and return immediately
+- All secrets in `.env` file - never commit credentials
+- Use absolute imports: `from app.model.lead_gen_model import LeadGenRequest`
+
+
+
+## **7\. Development Setup & Usage**
 
 ### **Prerequisites**
 
@@ -631,7 +728,7 @@ print(response.text)
 
 ---
 
-## **7. Gemini-Specific Implementation Details**
+## **8. Gemini-Specific Implementation Details**
 
 ### **Why We Use Gemini (Not OpenAI/Claude)**
 
@@ -701,7 +798,7 @@ except Exception as e:
 
 ---
 
-## **8. User Experience Flow (B2B2C)**
+## **9. User Experience Flow (B2B2C)**
 
 ### **Phase 1: Lead Discovery (Automated)**
 
@@ -738,7 +835,7 @@ except Exception as e:
 
 ---
 
-## **9. Troubleshooting & Common Issues**
+## **10. Troubleshooting & Common Issues**
 
 ### **Gemini API Errors**
 
@@ -804,7 +901,7 @@ print('Connected successfully')
 
 ---
 
-## **10. Performance Metrics**
+## **11. Performance Metrics**
 
 ### **Pipeline Execution Times**
 
@@ -830,7 +927,7 @@ print('Connected successfully')
 
 ---
 
-## **11. Future Enhancements**
+## **12. Future Enhancements**
 
 ### **Gemini Integration Improvements**
 
@@ -848,7 +945,7 @@ print('Connected successfully')
 
 ---
 
-## **12. References & Resources**
+## **13. References & Resources**
 
 ### **Documentation**
 
@@ -857,26 +954,6 @@ print('Connected successfully')
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [Confluent Kafka Python Client](https://docs.confluent.io/kafka-clients/python/current/overview.html)
 
-### **Code Structure**
-
-```
-backend/app/
-├── controller/agents/
-│   └── lead_gen_controller.py      # REST API endpoint
-├── service/agents/
-│   ├── lead_gen_service.py         # Pipeline orchestration
-│   ├── scout_agent.py              # Gemini Flash - Discovery
-│   ├── researcher_agent.py         # Gemini Flash - Enrichment
-│   └── strategist_agent.py         # Gemini Pro - Message generation
-├── model/
-│   └── lead_gen_model.py           # Pydantic schemas
-└── util/
-    ├── agents/
-    │   └── adk_config.py           # Environment config
-    └── confluent/
-        ├── lead_gen_producer.py    # Kafka publisher
-        └── lead_gen_listener.py    # Kafka consumer
-```
 
 ### **Support**
 
