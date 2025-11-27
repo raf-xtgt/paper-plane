@@ -281,7 +281,10 @@ Extract the decision-maker name, contact information, and one key fact from the 
             main_content = self._fetch_page_content(str(partner.website_url))
             
             if not main_content:
-                logger.warning(f"Failed to fetch main page for {partner.entity_name}")
+                logger.warning(
+                    f"Failed to fetch main page for {partner.entity_name} - "
+                    f"URL: {partner.website_url} - Marking as incomplete for manual review"
+                )
                 return PartnerEnrichment(
                     decision_maker=None,
                     contact_info=None,
@@ -312,7 +315,10 @@ Extract the decision-maker name, contact information, and one key fact from the 
                     all_text_content.append(text)
             
             if not all_text_content:
-                logger.warning(f"No text content extracted for {partner.entity_name}")
+                logger.warning(
+                    f"No text content extracted for {partner.entity_name} - "
+                    f"URL: {partner.website_url} - Marking as incomplete for manual review"
+                )
                 return PartnerEnrichment(
                     decision_maker=None,
                     contact_info=None,
@@ -341,18 +347,31 @@ Extract the decision-maker name, contact information, and one key fact from the 
                 status=status
             )
             
-            logger.info(
-                f"Enrichment {status} for {partner.entity_name} - "
-                f"decision_maker: {bool(enrichment.decision_maker)}, "
-                f"contact_info: {bool(enrichment.contact_info)}, "
-                f"key_fact: {bool(enrichment.key_fact)}"
-            )
+            if status == "incomplete":
+                logger.warning(
+                    f"Enrichment incomplete for {partner.entity_name} - "
+                    f"URL: {partner.website_url} - "
+                    f"decision_maker: {bool(enrichment.decision_maker)}, "
+                    f"contact_info: {bool(enrichment.contact_info)}, "
+                    f"key_fact: {bool(enrichment.key_fact)} - "
+                    f"Requires manual review"
+                )
+            else:
+                logger.info(
+                    f"Enrichment {status} for {partner.entity_name} - "
+                    f"decision_maker: {bool(enrichment.decision_maker)}, "
+                    f"contact_info: {bool(enrichment.contact_info)}, "
+                    f"key_fact: {bool(enrichment.key_fact)}"
+                )
             
             return enrichment
             
         except Exception as e:
             logger.error(
-                f"Partner enrichment failed for {partner.entity_name}, error: {str(e)}",
+                f"Partner enrichment failed for {partner.entity_name} - "
+                f"URL: {partner.website_url} - "
+                f"Error: {str(e)} - "
+                f"Marking as incomplete for manual review",
                 exc_info=True
             )
             return PartnerEnrichment(
@@ -367,6 +386,9 @@ Extract the decision-maker name, contact information, and one key fact from the 
         """
         Enrich multiple partners with contact details and key facts.
         
+        Skips failed websites and continues processing remaining partners.
+        All failures are logged for manual review.
+        
         Args:
             partners: List of PartnerDiscovery objects from Scout Agent
             
@@ -376,10 +398,36 @@ Extract the decision-maker name, contact information, and one key fact from the 
         logger.info(f"Starting enrichment for {len(partners)} partners")
         
         enriched_partners = []
+        failed_urls = []
         
         for partner in partners:
-            enrichment = self.enrich_partner(partner)
-            enriched_partners.append(enrichment)
+            try:
+                enrichment = self.enrich_partner(partner)
+                enriched_partners.append(enrichment)
+                
+                # Track failed URLs for summary logging
+                if enrichment.status == "incomplete":
+                    failed_urls.append(str(partner.website_url))
+                    
+            except Exception as e:
+                # Catch any unexpected errors and continue to next partner
+                logger.error(
+                    f"Unexpected error enriching {partner.entity_name} - "
+                    f"URL: {partner.website_url} - "
+                    f"Error: {str(e)} - "
+                    f"Skipping and continuing to next partner",
+                    exc_info=True
+                )
+                failed_urls.append(str(partner.website_url))
+                
+                # Still add incomplete enrichment to results
+                enriched_partners.append(PartnerEnrichment(
+                    decision_maker=None,
+                    contact_info=None,
+                    key_fact=None,
+                    verified_url=partner.website_url,
+                    status="incomplete"
+                ))
         
         # Log summary
         complete_count = sum(1 for p in enriched_partners if p.status == "complete")
@@ -389,5 +437,12 @@ Extract the decision-maker name, contact information, and one key fact from the 
             f"Enrichment complete: {complete_count} complete, {incomplete_count} incomplete "
             f"out of {len(partners)} total partners"
         )
+        
+        # Log failed URLs for manual review
+        if failed_urls:
+            logger.warning(
+                f"Failed URLs requiring manual review ({len(failed_urls)}): "
+                f"{', '.join(failed_urls)}"
+            )
         
         return enriched_partners
