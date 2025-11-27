@@ -1,0 +1,174 @@
+"""
+Kafka consumer for lead_generated topic.
+
+This module implements the LeadGenListener class that consumes lead generation
+events from Kafka and prepares them for dashboard notification.
+"""
+
+import json
+import asyncio
+import logging
+from confluent_kafka import Consumer, KafkaError
+from app.util.confluent.confluent_config import conf_base
+from app.model.lead_gen_model import LeadObject
+
+# Configure logger
+logger = logging.getLogger("lead_gen_listener")
+
+# Topic name
+TOPIC_LEAD_GENERATED = "lead_generated"
+
+
+class LeadGenListener:
+    """
+    Kafka consumer for processing lead_generated events.
+    
+    This class listens to the "lead_generated" Kafka topic and processes
+    incoming lead objects. It logs received leads and prepares data structures
+    for future dashboard notification integration.
+    """
+    
+    def __init__(self):
+        """Initialize the Kafka consumer for lead_generated topic."""
+        # Configure consumer with unique group ID
+        consumer_config = conf_base.copy()
+        consumer_config.update({
+            'group.id': 'fastapi_lead_gen_consumer_group',
+            'auto.offset.reset': 'earliest'
+        })
+        
+        self.consumer = Consumer(consumer_config)
+        self.consumer.subscribe([TOPIC_LEAD_GENERATED])
+        self.running = False
+        
+        logger.info(f"LeadGenListener initialized for topic: {TOPIC_LEAD_GENERATED}")
+    
+    def process_lead(self, lead_data: dict) -> dict:
+        """
+        Process incoming lead message from Kafka.
+        
+        This method parses the Lead Object from the Kafka message,
+        logs the received lead, and prepares a data structure for
+        dashboard notification (future integration point).
+        
+        Args:
+            lead_data: Raw lead data from Kafka message
+            
+        Returns:
+            dict: Prepared data structure for dashboard notification
+        """
+        try:
+            # Parse Lead Object using Pydantic model for validation
+            lead = LeadObject(**lead_data)
+            
+            # Log received lead with partner name and city
+            logger.info(
+                f"Lead received: {lead.partner_profile.name} in {lead.city} "
+                f"(Market: {lead.market})"
+            )
+            
+            # Log additional details at debug level
+            logger.debug(
+                f"Lead details - Contact: {lead.partner_profile.contact_person}, "
+                f"Method: {lead.partner_profile.contact_method}, "
+                f"Insight: {lead.ai_context.key_insight}"
+            )
+            
+            # Prepare data structure for dashboard notification
+            # This is a future integration point for the dashboard UI
+            dashboard_notification = {
+                "notification_type": "new_lead",
+                "lead_id": f"{lead.city}_{lead.partner_profile.name}_{lead.timestamp.isoformat()}",
+                "timestamp": lead.timestamp.isoformat(),
+                "summary": {
+                    "partner_name": lead.partner_profile.name,
+                    "city": lead.city,
+                    "market": lead.market,
+                    "contact_person": lead.partner_profile.contact_person,
+                    "entity_type": lead.partner_profile.entity_type
+                },
+                "details": {
+                    "website": str(lead.partner_profile.url),
+                    "contact_method": lead.partner_profile.contact_method,
+                    "key_insight": lead.ai_context.key_insight,
+                    "draft_message": lead.ai_context.draft_message
+                },
+                "actions": [
+                    {"type": "edit", "label": "Edit Message"},
+                    {"type": "approve", "label": "Approve & Send"}
+                ]
+            }
+            
+            logger.debug(f"Dashboard notification prepared: {dashboard_notification['lead_id']}")
+            
+            return dashboard_notification
+            
+        except Exception as e:
+            logger.error(f"Error processing lead: {e}", exc_info=True)
+            return None
+    
+    async def start(self):
+        """
+        Start consuming messages from lead_generated topic.
+        
+        This method runs in a background task and continuously polls
+        the Kafka topic for new lead generation events.
+        """
+        self.running = True
+        logger.info("LeadGenListener started - listening to lead_generated topic...")
+        
+        try:
+            while self.running:
+                # Poll for messages with short timeout
+                msg = self.consumer.poll(0.1)
+                
+                if msg is None:
+                    # No message available, sleep to avoid busy waiting
+                    await asyncio.sleep(1.0)
+                    continue
+                
+                if msg.error():
+                    if msg.error().code() == KafkaError._PARTITION_EOF:
+                        # End of partition, not an error
+                        logger.debug(f"Reached end of partition: {msg.partition()}")
+                    else:
+                        logger.error(f"Consumer error: {msg.error()}")
+                    continue
+                
+                # Process message
+                try:
+                    lead_data = json.loads(msg.value().decode('utf-8'))
+                    dashboard_data = self.process_lead(lead_data)
+                    
+                    if dashboard_data:
+                        # Future: Send to dashboard notification service
+                        # For now, just log that it's ready
+                        logger.info(
+                            f"Lead ready for dashboard: {dashboard_data['summary']['partner_name']}"
+                        )
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to decode message: {e}")
+                except Exception as e:
+                    logger.error(f"Error processing message: {e}", exc_info=True)
+                
+                # Yield control to event loop
+                await asyncio.sleep(0.01)
+                
+        except asyncio.CancelledError:
+            logger.info("LeadGenListener shutting down...")
+        finally:
+            self.stop()
+    
+    def stop(self):
+        """
+        Stop the consumer and close the connection.
+        """
+        self.running = False
+        if self.consumer:
+            self.consumer.close()
+            logger.info("LeadGenListener stopped and consumer closed")
+
+
+# Singleton instance for use in main.py
+lead_gen_listener = LeadGenListener()

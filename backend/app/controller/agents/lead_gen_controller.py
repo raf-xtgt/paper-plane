@@ -8,9 +8,7 @@ asynchronously and returns immediately with a job identifier for tracking.
 import uuid
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, HTTPException
 from app.model.lead_gen_model import LeadGenRequest, LeadGenResponse
 from app.service.agents.lead_gen_service import LeadGenPipeline
 
@@ -25,48 +23,6 @@ router = APIRouter(
 
 # Initialize pipeline (singleton pattern)
 pipeline = LeadGenPipeline()
-
-
-# Custom exception handler for validation errors
-@router.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """
-    Handle Pydantic validation errors and return HTTP 400 with descriptive messages.
-    
-    This handler catches validation errors from Pydantic models and formats them
-    into user-friendly error messages.
-    """
-    errors = exc.errors()
-    error_messages = []
-    
-    for error in errors:
-        field = ".".join(str(loc) for loc in error["loc"] if loc != "body")
-        msg = error["msg"]
-        error_type = error["type"]
-        
-        # Create descriptive error messages based on error type
-        if error_type == "missing":
-            error_messages.append(f"Field '{field}' is required")
-        elif error_type == "value_error.missing":
-            error_messages.append(f"Field '{field}' is required")
-        elif error_type == "type_error.enum":
-            # Extract allowed values from error message if available
-            error_messages.append(f"Invalid value for '{field}'. {msg}")
-        elif error_type == "value_error.any_str.min_length":
-            error_messages.append(f"Field '{field}' cannot be empty")
-        else:
-            error_messages.append(f"Invalid value for '{field}': {msg}")
-    
-    logger.warning(
-        f"Validation error in lead generation request: {'; '.join(error_messages)}"
-    )
-    
-    return JSONResponse(
-        status_code=400,
-        content={
-            "detail": "; ".join(error_messages) if error_messages else "Invalid request parameters"
-        }
-    )
 
 
 @router.post("/lead-gen", response_model=LeadGenResponse)

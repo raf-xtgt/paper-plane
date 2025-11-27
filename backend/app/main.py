@@ -9,7 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.util.confluent import *
+from app.util.confluent.lead_gen_listener import lead_gen_listener
 from app.controller import twilio
+from app.controller import agents
 
 
 load_dotenv()
@@ -30,12 +32,14 @@ async def lifespan(app: FastAPI):
     # Start Consumers in background tasks
     task_in = asyncio.create_task(consume_inbound())
     task_out = asyncio.create_task(consume_outbound())
+    task_lead_gen = asyncio.create_task(lead_gen_listener.start())
     
     yield
     
     # Clean up tasks on shutdown
     task_in.cancel()
     task_out.cancel()
+    task_lead_gen.cancel()
     
     # Wait for tasks to complete cancellation
     try:
@@ -45,6 +49,11 @@ async def lifespan(app: FastAPI):
     
     try:
         await task_out
+    except asyncio.CancelledError:
+        pass
+    
+    try:
+        await task_lead_gen
     except asyncio.CancelledError:
         pass
 
@@ -62,6 +71,7 @@ app.add_middleware(
 
 url_prefix = "/api/ppl"
 app.include_router(twilio.router, prefix=url_prefix)
+app.include_router(agents.router, prefix=url_prefix)
 
 
 
