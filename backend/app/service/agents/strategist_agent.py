@@ -8,6 +8,8 @@ key facts, and maintain a professional yet casual tone.
 
 import os
 import logging
+import json
+from typing import Optional
 import google.generativeai as genai
 from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, OutreachDraft
 
@@ -83,7 +85,7 @@ The message should be ready to send via WhatsApp without any modifications."""
     
     def _get_fallback_template(
         self, 
-        decision_maker: Optional[str], 
+        decision_maker: str | None, 
         market: str, 
         city: str,
         entity_name: str
@@ -100,12 +102,18 @@ The message should be ready to send via WhatsApp without any modifications."""
         Returns:
             Fallback message string
         """
-        greeting = f"Hi {decision_maker.split(',')[0].split()[-1]}" if decision_maker else "Hi"
+        # Extract first name from decision-maker if available
+        if decision_maker:
+            # Handle formats like "Dr. John Smith" or "John Smith, Principal"
+            name_part = decision_maker.split(',')[0].strip()
+            # Get last word as name (handles titles like Dr., Mr., etc.)
+            name = name_part.split()[-1]
+        else:
+            name = "there"
         
         return (
-            f"{greeting}, I work with {market} agencies in {city}. "
-            f"Would love to explore a partnership with {entity_name}. "
-            f"Open to a quick chat?"
+            f"Hi {name}, I work with {market} agencies in {city}. "
+            f"Would love to explore a partnership. Open to a quick chat?"
         )
     
     def draft_message(
@@ -176,7 +184,6 @@ Remember: 3 sentences max, include decision-maker's name, reference the key fact
             response = self.model.generate_content([system_prompt, user_prompt])
             
             # Parse JSON response
-            import json
             response_text = response.text.strip()
             
             # Remove markdown code blocks if present
