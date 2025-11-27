@@ -142,7 +142,10 @@ class ScoutAgent:
             return results
             
         except Exception as e:
-            logger.error(f"DuckDuckGo search failed for query '{query}': {str(e)}")
+            logger.error(
+                f"DuckDuckGo search failed - query: '{query}', error: {str(e)}",
+                exc_info=True
+            )
             return []
     
     def _extract_partners_with_llm(
@@ -163,7 +166,7 @@ class ScoutAgent:
             List of PartnerDiscovery objects
         """
         if not search_results:
-            logger.warning("No search results to process")
+            logger.warning(f"No search results to process - city: {city}, market: {market}")
             return []
         
         try:
@@ -214,18 +217,28 @@ class ScoutAgent:
                     )
                     partners.append(partner)
                 except Exception as e:
-                    logger.warning(f"Failed to parse partner data: {data}. Error: {str(e)}")
+                    logger.warning(
+                        f"Failed to parse partner data - city: {city}, market: {market}, "
+                        f"data: {data}, error: {str(e)}"
+                    )
                     continue
             
             logger.info(f"Extracted {len(partners)} partners from search results")
             return partners
             
         except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM JSON response: {str(e)}")
-            logger.debug(f"Raw response: {response.text}")
+            logger.error(
+                f"Failed to parse LLM JSON response - city: {city}, market: {market}, "
+                f"error: {str(e)}",
+                exc_info=True
+            )
+            logger.debug(f"Raw LLM response: {response.text if 'response' in locals() else 'N/A'}")
             return []
         except Exception as e:
-            logger.error(f"LLM extraction failed: {str(e)}")
+            logger.error(
+                f"LLM extraction failed - city: {city}, market: {market}, error: {str(e)}",
+                exc_info=True
+            )
             return []
     
     def discover_partners(self, city: str, market: str) -> List[PartnerDiscovery]:
@@ -237,14 +250,14 @@ class ScoutAgent:
             market: Market vertical (Student Recruitment or Medical Tourism)
             
         Returns:
-            List of 3-10 PartnerDiscovery objects
+            List of 3-10 PartnerDiscovery objects, or empty list on failure
         """
         logger.info(f"Starting partner discovery: city={city}, market={market}")
         
         try:
             # Generate search queries
             queries = self._generate_search_queries(city, market)
-            logger.debug(f"Generated {len(queries)} search queries")
+            logger.debug(f"Generated {len(queries)} search queries: {queries}")
             
             # Collect search results from all queries
             all_results = []
@@ -253,7 +266,10 @@ class ScoutAgent:
                 all_results.extend(results)
             
             if not all_results:
-                logger.warning(f"No search results found for {city}, {market}")
+                logger.warning(
+                    f"No search results found - city: {city}, market: {market}, "
+                    f"queries: {queries}"
+                )
                 return []
             
             logger.info(f"Collected {len(all_results)} total search results")
@@ -262,12 +278,22 @@ class ScoutAgent:
             partners = self._extract_partners_with_llm(all_results, city, market)
             
             if not partners:
-                logger.warning(f"No partners extracted for {city}, {market}")
+                logger.warning(
+                    f"No partners extracted - city: {city}, market: {market}, "
+                    f"search_results_count: {len(all_results)}"
+                )
                 return []
             
-            logger.info(f"Successfully discovered {len(partners)} partners")
+            logger.info(
+                f"Successfully discovered {len(partners)} partners - "
+                f"city: {city}, market: {market}"
+            )
             return partners
             
         except Exception as e:
-            logger.error(f"Partner discovery failed for {city}, {market}: {str(e)}")
+            logger.error(
+                f"Partner discovery failed - city: {city}, market: {market}, "
+                f"error: {str(e)}",
+                exc_info=True
+            )
             return []
