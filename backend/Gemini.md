@@ -18,12 +18,12 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    FastAPI Application                       │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
-│  │ Controllers  │  │  Services    │  │    Utils     │      │
-│  │ (HTTP API)   │→ │ (Business    │→ │ (External    │      │
-│  │              │  │  Logic)      │  │  Clients)    │      │
-│  └──────────────┘  └──────────────┘  └──────────────┘      │
+│                    FastAPI Application                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │ Controllers  │  │  Services    │  │    Utils     │       │
+│  │ (HTTP API)   │→ │ (Business    │→ │ (External    │       │
+│  │              │  │  Logic)      │  │  Clients)    │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
 └─────────────────────────────────────────────────────────────┘
                             ↓
                     ┌───────────────┐
@@ -31,7 +31,7 @@
                     │ Kafka Topics  │
                     │ (Event Bus)   │
                     └───────────────┘
-                            ↓
+                           ↓
         ┌──────────────────┼──────────────────┐
         ↓                  ↓                   ↓
 ┌───────────────┐  ┌───────────────┐  ┌───────────────┐
@@ -438,31 +438,31 @@ class OutreachDraft(BaseModel):
 ┌─────────────────────────────────────────────────────────────┐
 │ LeadGenPipeline.execute(city, market)                       │
 ├─────────────────────────────────────────────────────────────┤
-│                                                              │
-│  1. Scout Agent                                              │
+│                                                             │
+│  1. Scout Agent                                             │
 │     ├─ Generate search queries                              │
 │     ├─ Execute DuckDuckGo searches                          │
 │     ├─ Send results to Gemini Flash                         │
 │     └─ Return 3-10 PartnerDiscovery objects                 │
-│                                                              │
+│                                                             │
 │  2. Researcher Agent (for each partner)                     │
 │     ├─ Fetch website HTML (30s timeout)                     │
 │     ├─ Find Contact/About/Staff pages                       │
 │     ├─ Extract text with BeautifulSoup                      │
 │     ├─ Send to Gemini Flash for extraction                  │
 │     └─ Return PartnerEnrichment object                      │
-│                                                              │
+│                                                             │
 │  3. Strategist Agent (for each partner)                     │
 │     ├─ Receive discovery + enrichment data                  │
 │     ├─ Send context to Gemini Pro                           │
 │     ├─ Parse JSON response                                  │
 │     └─ Return OutreachDraft object                          │
-│                                                              │
-│  4. Format & Publish                                         │
+│                                                             │
+│  4. Format & Publish                                        │
 │     ├─ Combine outputs into LeadObject                      │
 │     ├─ Publish to Kafka "lead_generated" topic              │
 │     └─ Log completion metrics                               │
-│                                                              │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
