@@ -1,5 +1,6 @@
 from dotenv import load_dotenv
 import os
+import logging
 from fastapi.middleware.cors import CORSMiddleware
 import vertexai
 import asyncio
@@ -15,6 +16,28 @@ from app.controller import agents
 
 
 load_dotenv()
+
+# Configure logging for lead generation pipeline
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# Set specific log levels for lead generation components
+logging.getLogger("lead_gen_pipeline").setLevel(logging.INFO)
+logging.getLogger("lead_gen_pipeline.scout").setLevel(logging.INFO)
+logging.getLogger("lead_gen_pipeline.researcher").setLevel(logging.INFO)
+logging.getLogger("lead_gen_pipeline.strategist").setLevel(logging.INFO)
+logging.getLogger("lead_gen_controller").setLevel(logging.INFO)
+
+# Optionally set DEBUG level for development (can be controlled via env var)
+if os.getenv("LOG_LEVEL", "INFO").upper() == "DEBUG":
+    logging.getLogger("lead_gen_pipeline").setLevel(logging.DEBUG)
+    logging.getLogger("lead_gen_pipeline.scout").setLevel(logging.DEBUG)
+    logging.getLogger("lead_gen_pipeline.researcher").setLevel(logging.DEBUG)
+    logging.getLogger("lead_gen_pipeline.strategist").setLevel(logging.DEBUG)
+    logging.getLogger("lead_gen_controller").setLevel(logging.DEBUG)
 
 GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID")
 GCP_REGION = os.getenv("GCP_REGION") # e.g., "us-central1"
