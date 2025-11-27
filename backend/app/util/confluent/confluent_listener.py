@@ -22,9 +22,9 @@ async def consume_inbound():
     print("Listening to Inbound Topic...")
     try:
         while True:
-            msg = consumer.poll(1.0)
+            msg = consumer.poll(0.1)  # Reduced timeout to 100ms
             if msg is None: 
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(1.0)  # Sleep longer when no messages
                 continue
             if msg.error():
                 print(f"Consumer error: {msg.error()}")
@@ -57,9 +57,9 @@ async def consume_outbound():
     print("Listening to Outbound Topic...")
     try:
         while True:
-            msg = consumer.poll(1.0)
+            msg = consumer.poll(0.1)  # Reduced timeout to 100ms
             if msg is None: 
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(1.0)  # Sleep longer when no messages
                 continue
             if msg.error():
                 print(f"Consumer error: {msg.error()}")
