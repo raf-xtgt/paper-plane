@@ -13,7 +13,7 @@ from typing import Optional, List
 from bs4 import BeautifulSoup
 import google.generativeai as genai
 from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment
-
+import json
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.researcher")
 
@@ -232,7 +232,6 @@ Extract the decision-maker name, contact information, and one key fact from the 
             response = self.model.generate_content([system_prompt, user_prompt])
             
             # Parse JSON response
-            import json
             response_text = response.text.strip()
             
             # Remove markdown code blocks if present

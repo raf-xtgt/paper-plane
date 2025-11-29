@@ -14,6 +14,7 @@ from datetime import datetime
 from app.service.agents.scout_agent import ScoutAgent
 from app.service.agents.researcher_agent import ResearcherAgent
 from app.service.agents.strategist_agent import StrategistAgent
+from app.util.confluent.lead_gen_producer import LeadGenProducer
 from app.model.lead_gen_model import (
     LeadObject,
     PartnerProfile,
@@ -47,6 +48,9 @@ class LeadGenPipeline:
         self.scout = ScoutAgent()
         self.researcher = ResearcherAgent()
         self.strategist = StrategistAgent()
+        
+        # Initialize Kafka producer
+        self.lead_producer = LeadGenProducer()
         
         # Load configuration
         self.pipeline_timeout = int(os.getenv("LEAD_GEN_TIMEOUT", "300"))  # 5 minutes default
@@ -302,11 +306,43 @@ class LeadGenPipeline:
                 f"leads: {len(lead_objects)}, duration: {duration:.2f}s"
             )
             
-            # TODO: Invoke Kafka producer to publish lead_objects
-            # This will be implemented in task 7.1
+            # Publish leads to Kafka
             logger.info(
-                f"Ready to publish {len(lead_objects)} leads to Kafka - "
-                f"job_id: {job_id} (Kafka producer not yet implemented)"
+                f"Publishing {len(lead_objects)} leads to Kafka - "
+                f"job_id: {job_id}, topic: lead_generated"
+            )
+            
+            publish_start = datetime.utcnow()
+            success_count = 0
+            failure_count = 0
+            
+            for lead in lead_objects:
+                try:
+                    published = await self.lead_producer.publish_lead(lead)
+                    if published:
+                        success_count += 1
+                    else:
+                        failure_count += 1
+                except Exception as e:
+                    logger.error(
+                        f"Failed to publish lead '{lead.partner_profile.name}' - "
+                        f"job_id: {job_id}, error: {str(e)}",
+                        exc_info=True
+                    )
+                    failure_count += 1
+            
+            # Flush producer to ensure all messages are sent
+            self.lead_producer.flush()
+            
+            publish_duration = (datetime.utcnow() - publish_start).total_seconds()
+            
+            logger.info(
+                f"Kafka publishing complete - "
+                f"job_id: {job_id}, "
+                f"total: {len(lead_objects)}, "
+                f"success: {success_count}, "
+                f"failed: {failure_count}, "
+                f"duration: {publish_duration:.2f}s"
             )
             
         except asyncio.TimeoutError:

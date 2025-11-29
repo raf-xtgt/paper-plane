@@ -12,6 +12,7 @@ from typing import List
 from duckduckgo_search import DDGS
 import google.generativeai as genai
 from app.model.lead_gen_model import PartnerDiscovery
+import json
 
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.scout")
@@ -191,7 +192,6 @@ class ScoutAgent:
             response = self.model.generate_content([system_prompt, user_prompt])
             
             # Parse JSON response
-            import json
             response_text = response.text.strip()
             
             # Remove markdown code blocks if present
