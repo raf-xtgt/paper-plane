@@ -9,6 +9,7 @@ import json
 import asyncio
 import logging
 from confluent_kafka import Consumer, KafkaError
+from pydantic import ValidationError
 from app.util.confluent.confluent_config import conf_base
 from app.model.lead_gen_model import LeadObject
 
@@ -58,8 +59,22 @@ class LeadGenListener:
             dict: Prepared data structure for dashboard notification
         """
         try:
+            # Extract relevant fields from the incoming lead_data structure
+            # The LeadObject expects fields like 'source_agent', 'market', 'city', etc.,
+            # directly, but the Kafka message nests these under a 'data' key.
+            event_type = lead_data.get("event_type")
+            timestamp_str = lead_data.get("timestamp")
+            nested_data = lead_data.get("data", {})
+            
+            # Combine top-level fields with the nested 'data' fields for Pydantic parsing
+            combined_data_for_pydantic = {
+                "event_type": event_type,
+                "timestamp": timestamp_str,
+                **nested_data # Unpack the nested data
+            }
+            
             # Parse Lead Object using Pydantic model for validation
-            lead = LeadObject(**lead_data)
+            lead = LeadObject(**combined_data_for_pydantic)
             
             # Log received lead with partner name and city
             logger.info(
@@ -103,8 +118,11 @@ class LeadGenListener:
             
             return dashboard_notification
             
+        except ValidationError as ve:
+            logger.error(f"Pydantic validation error processing lead: {ve.errors()}", exc_info=True)
+            return None
         except Exception as e:
-            logger.error(f"Error processing lead: {e}", exc_info=True)
+            logger.error(f"Unexpected error processing lead: {e}", exc_info=True)
             return None
     
     async def start(self):
