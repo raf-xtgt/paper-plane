@@ -9,7 +9,7 @@ website URLs, and entity types.
 import os
 import logging
 from typing import List
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 import google.generativeai as genai
 from app.model.lead_gen_model import PartnerDiscovery
 import json

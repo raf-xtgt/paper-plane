@@ -72,4 +72,4 @@ uvicorn==0.38.0
 websockets==15.0.1
 yarl==1.22.0
 beautifulsoup4>=4.12.0
-duckduckgo-search>=3.9.0
+ddgs>=3.9.0
