@@ -221,12 +221,13 @@ class ResearcherAgent:
             if len(text_content) > 4000:
                 text_content = text_content[:4000] + "\n... [content truncated]"
             
-            user_prompt = f"""Entity Name: {entity_name}
-
-Website Content:
-{text_content}
-
-Extract the decision-maker name, contact information, and one key fact from the above content."""
+            user_prompt = f"""
+            Entity Name: {entity_name}                
+            Website Content:
+            {text_content}
+                
+            Extract the decision-maker name, contact information, and one key fact from the above content.
+            """
             
             logger.debug(f"Sending {len(text_content)} chars to Gemini for extraction")
             response = self.model.generate_content([system_prompt, user_prompt])

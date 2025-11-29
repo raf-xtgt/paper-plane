@@ -257,7 +257,7 @@ class ScoutAgent:
         try:
             # Generate search queries
             queries = self._generate_search_queries(city, market)
-            logger.debug(f"Generated {len(queries)} search queries: {queries}")
+            logger.info(f"Generated {len(queries)} search queries: {queries}")
             
             # Collect search results from all queries
             all_results = []
