@@ -12,6 +12,11 @@ from confluent_kafka import Consumer, KafkaError
 from pydantic import ValidationError
 from app.util.confluent.confluent_config import conf_base
 from app.model.lead_gen_model import LeadObject
+from app.util.api.db_config import AsyncSessionLocal
+from app.service.lead_profile.lead_profile_service import LeadProfileService
+from app.service.lead_profile.generated_lead_service import GeneratedLeadService
+from app.model.api.ppl_lead_profile import PPLPartnerProfileCreate
+from app.model.api.ppl_generated_lead import PPLGeneratedLeadCreate
 
 # Configure logger
 logger = logging.getLogger("lead_gen_listener")
@@ -41,10 +46,12 @@ class LeadGenListener:
         self.consumer = Consumer(consumer_config)
         self.consumer.subscribe([TOPIC_LEAD_GENERATED])
         self.running = False
+        self.lead_profile_service = LeadProfileService()
+        self.generated_lead_service = GeneratedLeadService()
         
         logger.info(f"LeadGenListener initialized for topic: {TOPIC_LEAD_GENERATED}")
     
-    def process_lead(self, lead_data: dict) -> dict:
+    async def process_lead(self, lead_data: dict) -> dict:
         """
         Process incoming lead message from Kafka.
         
@@ -117,6 +124,51 @@ class LeadGenListener:
             
             logger.debug(f"Dashboard notification prepared: {dashboard_notification['lead_id']}")
             
+            # Persist to database
+            async with AsyncSessionLocal() as db:
+                try:
+                    # Create partner profile
+                    partner_profile_create = PPLPartnerProfileCreate(
+                        name=lead.partner_profile.name,
+                        url=str(lead.partner_profile.url) if lead.partner_profile.url else None,
+                        contact_person=lead.partner_profile.contact_person,
+                        contact_method=lead.partner_profile.contact_method,
+                        contact_channel=lead.partner_profile.contact_channel,
+                        entity_type=lead.partner_profile.entity_type,
+                        user_guid=lead.user_guid if hasattr(lead, 'user_guid') else None
+                    )
+                    
+                    db_partner_profile = await self.lead_profile_service.create_lead_profile(
+                        db, partner_profile_create
+                    )
+                    logger.info(f"Partner profile created: {db_partner_profile.guid}")
+                    
+                    # Create generated lead
+                    generated_lead_create = PPLGeneratedLeadCreate(
+                        partner_profile_guid=db_partner_profile.guid,
+                        user_guid=lead.user_guid if hasattr(lead, 'user_guid') else db_partner_profile.guid,
+                        market=lead.market,
+                        city=lead.city,
+                        source_agent=lead.source_agent,
+                        key_insight=lead.ai_context.key_insight,
+                        draft_message=lead.ai_context.draft_message,
+                        notification_data=dashboard_notification,
+                        status="pending"
+                    )
+                    
+                    db_generated_lead = await self.generated_lead_service.create_generated_lead(
+                        db, generated_lead_create
+                    )
+                    logger.info(f"Generated lead created: {db_generated_lead.guid}")
+                    
+                    # Update dashboard notification with database GUIDs
+                    dashboard_notification["lead_id"] = str(db_generated_lead.guid)
+                    dashboard_notification["partner_profile_guid"] = str(db_partner_profile.guid)
+                    
+                except Exception as db_error:
+                    logger.error(f"Database error persisting lead: {db_error}", exc_info=True)
+                    # Continue processing even if DB fails
+            
             return dashboard_notification
             
         except ValidationError as ve:
@@ -157,7 +209,7 @@ class LeadGenListener:
                 # Process message
                 try:
                     lead_data = json.loads(msg.value().decode('utf-8'))
-                    dashboard_data = self.process_lead(lead_data)
+                    dashboard_data = await self.process_lead(lead_data)
                     
                     if dashboard_data:
                         # Future: Send to dashboard notification service

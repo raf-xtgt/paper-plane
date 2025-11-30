@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.model.api.pl_lead_profile import PPLPartnerProfileCreate, PPLPartnerProfileDB
+from app.model.api.ppl_lead_profile import PPLPartnerProfileCreate, PPLPartnerProfileDB
 import uuid
 
 class LeadProfileService:
