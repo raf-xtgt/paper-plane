@@ -105,6 +105,7 @@ class LeadGenListener:
                 "details": {
                     "website": str(lead.partner_profile.url),
                     "contact_method": lead.partner_profile.contact_method,
+                    "contact_channel": lead.partner_profile.contact_channel,
                     "key_insight": lead.ai_context.key_insight,
                     "draft_message": lead.ai_context.draft_message
                 },

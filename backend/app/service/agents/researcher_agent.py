@@ -65,8 +65,15 @@ class ResearcherAgent:
 
         Extract the following information:
         1. Decision-maker name: Look for titles like Principal, Head Doctor, Director, CEO, Founder, Head of School, Medical Director
-        2. Contact information: Email address, phone number, or WhatsApp number (prefer direct contact, not general info@)
-        3. Key fact: One interesting fact for personalization such as:
+        2. Contact information: Email address, phone number, WhatsApp, Messenger, Instagram etc (prefer direct contact, not general info). 
+        The contact information may belong to the decision maker. If decision maker contact information is not found, then use any contact or outreach information. 
+        3. Contact channel: Identify the available contact channel based on the contact information found:
+           - "WhatsApp" if WhatsApp number is mentioned
+           - "Email" if email address is provided
+           - "Messenger" if Facebook Messenger is mentioned
+           - "Instagram" if Instagram handle is provided
+           - "PhoneNo" if only phone number is available
+        4. Key fact: One interesting fact for personalization such as:
            - Recent awards or recognitions
            - New branches or expansion
            - Institutional motto or mission
@@ -78,6 +85,7 @@ class ResearcherAgent:
         {
             "decision_maker": "Name of decision maker or null",
             "contact_info": "Email/phone/WhatsApp or null",
+            "contact_channel": "WhatsApp|Email|Messenger|Instagram|PhoneNo or null",
             "key_fact": "One interesting fact or null"
         }
 
@@ -86,6 +94,7 @@ class ResearcherAgent:
         - Be precise - only extract information you are confident about
         - For decision_maker, include their title (e.g., "Dr. John Smith, Medical Director")
         - For contact_info, prefer direct contact over general info
+        - For contact_channel, choose the most appropriate channel based on available contact methods
         - For key_fact, choose the most relevant for business outreach
         - Return ONLY the JSON object, no additional text"""
     
@@ -212,7 +221,7 @@ class ResearcherAgent:
             entity_name: Name of the partner entity
             
         Returns:
-            Dictionary with decision_maker, contact_info, and key_fact
+            Dictionary with decision_maker, contact_info, contact_channel, and key_fact
         """
         try:
             system_prompt = self._get_system_prompt()
@@ -226,7 +235,7 @@ class ResearcherAgent:
             Website Content:
             {text_content}
                 
-            Extract the decision-maker name, contact information, and one key fact from the above content.
+            Extract the decision-maker name, contact information, contact channel, and one key fact from the above content.
             """
             
             logger.debug(f"Sending {len(text_content)} chars to Gemini for extraction")
@@ -256,13 +265,13 @@ class ResearcherAgent:
                 exc_info=True
             )
             logger.debug(f"Raw LLM response: {response.text if 'response' in locals() else 'N/A'}")
-            return {"decision_maker": None, "contact_info": None, "key_fact": None}
+            return {"decision_maker": None, "contact_info": None, "contact_channel": None, "key_fact": None}
         except Exception as e:
             logger.error(
                 f"LLM extraction failed for {entity_name}, error: {str(e)}",
                 exc_info=True
             )
-            return {"decision_maker": None, "contact_info": None, "key_fact": None}
+            return {"decision_maker": None, "contact_info": None, "contact_channel": None, "key_fact": None}
     
     def enrich_partner(self, partner: PartnerDiscovery) -> PartnerEnrichment:
         """
@@ -288,6 +297,7 @@ class ResearcherAgent:
                 return PartnerEnrichment(
                     decision_maker=None,
                     contact_info=None,
+                    contact_channel=None,
                     key_fact=None,
                     verified_url=partner.website_url,
                     status="incomplete"
@@ -322,6 +332,7 @@ class ResearcherAgent:
                 return PartnerEnrichment(
                     decision_maker=None,
                     contact_info=None,
+                    contact_channel=None,
                     key_fact=None,
                     verified_url=partner.website_url,
                     status="incomplete"
@@ -342,6 +353,7 @@ class ResearcherAgent:
             enrichment = PartnerEnrichment(
                 decision_maker=extracted_info.get("decision_maker"),
                 contact_info=extracted_info.get("contact_info"),
+                contact_channel=extracted_info.get("contact_channel"),
                 key_fact=extracted_info.get("key_fact"),
                 verified_url=partner.website_url,
                 status=status
@@ -353,6 +365,7 @@ class ResearcherAgent:
                     f"URL: {partner.website_url} - "
                     f"decision_maker: {bool(enrichment.decision_maker)}, "
                     f"contact_info: {bool(enrichment.contact_info)}, "
+                    f"contact_channel: {enrichment.contact_channel}, "
                     f"key_fact: {bool(enrichment.key_fact)} - "
                     f"Requires manual review"
                 )
@@ -361,6 +374,7 @@ class ResearcherAgent:
                     f"Enrichment {status} for {partner.entity_name} - "
                     f"decision_maker: {bool(enrichment.decision_maker)}, "
                     f"contact_info: {bool(enrichment.contact_info)}, "
+                    f"contact_channel: {enrichment.contact_channel}, "
                     f"key_fact: {bool(enrichment.key_fact)}"
                 )
             
@@ -377,6 +391,7 @@ class ResearcherAgent:
             return PartnerEnrichment(
                 decision_maker=None,
                 contact_info=None,
+                contact_channel=None,
                 key_fact=None,
                 verified_url=partner.website_url,
                 status="incomplete"
@@ -424,6 +439,7 @@ class ResearcherAgent:
                 enriched_partners.append(PartnerEnrichment(
                     decision_maker=None,
                     contact_info=None,
+                    contact_channel=None,
                     key_fact=None,
                     verified_url=partner.website_url,
                     status="incomplete"

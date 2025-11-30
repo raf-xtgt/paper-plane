@@ -86,6 +86,7 @@ class LeadGenPipeline:
             url=enrichment.verified_url,
             contact_person=enrichment.decision_maker,
             contact_method=enrichment.contact_info,
+            contact_channel=enrichment.contact_channel,
             entity_type=discovery.type
         )
         

@@ -63,12 +63,16 @@ class PartnerEnrichment(BaseModel):
     Attributes:
         decision_maker: Name of the decision-maker (Principal, Director, etc.)
         contact_info: Direct contact information (email, phone, WhatsApp)
+        contact_channel: Preferred contact channel (WhatsApp, Email, Messenger, Instagram, PhoneNo)
         key_fact: One key fact for personalization (awards, branches, motto)
         verified_url: Verified website URL after scraping
         status: Enrichment status (complete or incomplete)
     """
     decision_maker: Optional[str] = Field(None, description="Decision-maker name")
     contact_info: Optional[str] = Field(None, description="Contact information")
+    contact_channel: Optional[Literal["WhatsApp", "Email", "Messenger", "Instagram", "PhoneNo"]] = Field(
+        None, description="Preferred contact channel"
+    )
     key_fact: Optional[str] = Field(None, description="Key fact for personalization")
     verified_url: HttpUrl = Field(..., description="Verified website URL")
     status: Literal["complete", "incomplete"] = Field(
@@ -101,12 +105,16 @@ class PartnerProfile(BaseModel):
         url: Partner website URL
         contact_person: Name of the contact person
         contact_method: Contact method (email, phone, WhatsApp)
+        contact_channel: Preferred contact channel (WhatsApp, Email, Messenger, Instagram, PhoneNo)
         entity_type: Type of partner entity
     """
     name: str = Field(..., description="Partner name")
     url: HttpUrl = Field(..., description="Partner website")
     contact_person: Optional[str] = Field(None, description="Contact person name")
     contact_method: Optional[str] = Field(None, description="Contact method")
+    contact_channel: Optional[Literal["WhatsApp", "Email", "Messenger", "Instagram", "PhoneNo"]] = Field(
+        None, description="Preferred contact channel"
+    )
     entity_type: str = Field(..., description="Entity type")
 
 
