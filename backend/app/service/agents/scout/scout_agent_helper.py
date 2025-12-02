@@ -5,67 +5,97 @@ from playwright.async_api import async_playwright
 
 async def extract_business_info(page):
     """
-    Extracts data from the currently open details panel.
+    Extracts data from the currently open business card in the side panel.
+    Uses the new scraping strategy based on Google Maps HTML structure.
     """
     data = {
         "org_name": None,
         "primary_contact": None,
         "review_score": None,
         "total_reviews": None,
-        "website_url": None
+        "website_url": None,
+        "address": None
     }
 
     try:
-        # 1. Organization Name (Usually the H1 in the side panel)
-        # We wait briefly for the main header to appear
-        await page.wait_for_selector("h1", timeout=5000)
-        data["org_name"] = await page.locator("h1").first.inner_text()
-
-        # 2. Review Score & Total Reviews
-        # These are usually grouped near the stars.
-        # We look for the span that contains the numeric rating (e.g. "4.7")
-        # Google often puts the score in a div with role="img" aria-label="4.7 stars"
-        # But a more robust way is looking for the text directly if the aria-label is complex
+        # Wait for the business card to load
+        await page.wait_for_selector('div[role="article"]', timeout=5000)
+        
+        # Get the first article div (the business card)
+        business_card = page.locator('div[role="article"]').first
+        
+        # 1. Organization Name - Extract from aria-label attribute
         try:
-            rating_locator = page.locator('div[role="main"] span[role="img"]').first
-            aria_label = await rating_locator.get_attribute("aria-label") 
-            # aria_label format: "4.7 stars 87 Reviews" or similar
+            aria_label = await business_card.get_attribute("aria-label")
             if aria_label:
-                # Extract score
-                score_match = re.search(r"(\d\.\d)", aria_label)
-                if score_match:
-                    data["review_score"] = score_match.group(1)
-                
-                # Extract count (sometimes in the label, sometimes in a separate span)
-                # Let's try to find the count in the text next to the stars usually inside parenthesis
-                count_locator = page.locator('div[role="main"] button[jsaction*="reviewChart"]').first
-                if await count_locator.count() > 0:
-                     count_text = await count_locator.inner_text() # e.g. "(87)"
-                     data["total_reviews"] = count_text.replace("(", "").replace(")", "").replace(",", "")
-        except Exception:
-            pass # Keep default None if scraping fails
+                data["org_name"] = aria_label.strip()
+        except Exception as e:
+            print(f"Error extracting org_name: {e}")
 
-        # 3. Website URL
-        # Look for the button with 'website' in the aria-label or data-item-id="authority"
+        # 2. Review Score - Extract from span.MW4etd
         try:
-            website_btn = page.locator('a[data-item-id="authority"]').first
-            if await website_btn.count() > 0:
-                data["website_url"] = await website_btn.get_attribute("href")
-        except Exception:
-            pass
+            score_locator = business_card.locator('span.MW4etd[aria-hidden="true"]').first
+            if await score_locator.count() > 0:
+                data["review_score"] = (await score_locator.inner_text()).strip()
+        except Exception as e:
+            print(f"Error extracting review_score: {e}")
 
-        # 4. Primary Contact (Phone)
-        # Look for button with data-item-id that starts with 'phone'
+        # 3. Total Reviews - Extract from span.UY7F9
         try:
-            phone_btn = page.locator('button[data-item-id^="phone"]').first
-            if await phone_btn.count() > 0:
-                # The text is often inside a div within the button
-                data["primary_contact"] = (await phone_btn.get_attribute("aria-label")).replace("Phone: ", "")
-        except Exception:
-            pass
+            reviews_locator = business_card.locator('span.UY7F9[aria-hidden="true"]').first
+            if await reviews_locator.count() > 0:
+                reviews_text = await reviews_locator.inner_text()
+                # Remove parentheses and commas
+                data["total_reviews"] = reviews_text.strip().replace('(', '').replace(')', '').replace(',', '')
+        except Exception as e:
+            print(f"Error extracting total_reviews: {e}")
+
+        # 4. Address - Look for pattern: <span aria-hidden="true">·</span> <span>address</span>
+        try:
+            # Find all spans with aria-hidden="true" containing "·"
+            separator_spans = business_card.locator('span[aria-hidden="true"]')
+            separator_count = await separator_spans.count()
+            
+            for i in range(separator_count):
+                span_text = await separator_spans.nth(i).inner_text()
+                if span_text.strip() == "·":
+                    # Get the next sibling span
+                    parent = separator_spans.nth(i).locator('..')
+                    next_spans = await parent.locator('span').all()
+                    
+                    # Check spans after the separator
+                    for span in next_spans:
+                        span_content = await span.inner_text()
+                        # Check if it looks like an address (contains numbers and street keywords)
+                        if re.search(r'\d+\s+\w+\s+(Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Suite|Ste|#)', span_content, re.IGNORECASE):
+                            data["address"] = span_content.strip()
+                            break
+                    
+                    if data["address"]:
+                        break
+        except Exception as e:
+            print(f"Error extracting address: {e}")
+
+        # 5. Website URL - Extract from a.lcr4fd.S9kvJb href attribute
+        try:
+            website_link = business_card.locator('a.lcr4fd.S9kvJb').first
+            if await website_link.count() > 0:
+                href = await website_link.get_attribute("href")
+                data["website_url"] = href
+        except Exception as e:
+            print(f"Error extracting website_url: {e}")
+
+        # 6. Primary Contact (Phone) - Look for phone number in span.UsdlK
+        try:
+            phone_locator = business_card.locator('span.UsdlK').first
+            if await phone_locator.count() > 0:
+                phone_text = await phone_locator.inner_text()
+                data["primary_contact"] = phone_text.strip()
+        except Exception as e:
+            print(f"Error extracting phone: {e}")
 
     except Exception as e:
-        print(f"Error extracting data: {e}")
+        print(f"Error extracting business data: {e}")
 
     return data
 

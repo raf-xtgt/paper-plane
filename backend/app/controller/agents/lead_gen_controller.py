@@ -138,7 +138,7 @@ async def trigger_lead_generation(request: LeadGenRequest):
 
 
 @router.post("/scrape")
-async def srape_gmaps(request: SearchQuery):
+async def scrape_gmaps(request: SearchQuery):
     query=request.query
     scraped_data = await scrape_google_maps(query)
     print("\n--- FINAL OUTPUT (Newark) ---")
