@@ -153,3 +153,8 @@ class LeadObject(BaseModel):
     city: str = Field(..., description="Target city")
     partner_profile: PartnerProfile = Field(..., description="Partner details")
     ai_context: AIContext = Field(..., description="AI-generated context")
+
+
+
+class SearchQuery(BaseModel):
+    query: str

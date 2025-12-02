@@ -9,8 +9,9 @@ import uuid
 import asyncio
 import logging
 from fastapi import APIRouter, HTTPException
-from app.model.lead_gen_model import LeadGenRequest, LeadGenResponse
+from app.model.lead_gen_model import LeadGenRequest, LeadGenResponse, SearchQuery
 from app.service.agents.lead_gen_service import LeadGenPipeline
+from app.service.agents.scout.scout_agent_helper import scrape_google_maps
 
 # Configure logging
 logger = logging.getLogger("lead_gen_controller")
@@ -134,3 +135,14 @@ async def trigger_lead_generation(request: LeadGenRequest):
             status_code=500,
             detail="Internal server error: Failed to start lead generation pipeline. Please try again later."
         )
+
+
+@router.post("/scrape")
+async def srape_gmaps(request: SearchQuery):
+    query=request.query    
+    scraped_data = scrape_google_maps(query)
+    print("\n--- FINAL OUTPUT (Newark) ---")
+    print(scraped_data)
+
+        
+    

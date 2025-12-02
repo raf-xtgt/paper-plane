@@ -11,7 +11,7 @@ import logging
 import asyncio
 from typing import List
 from datetime import datetime
-from app.service.agents.scout_agent import ScoutAgent
+from app.service.agents.scout.scout_agent import ScoutAgent
 from app.service.agents.researcher_agent import ResearcherAgent
 from app.service.agents.strategist_agent import StrategistAgent
 from app.util.confluent.lead_gen_producer import LeadGenProducer
