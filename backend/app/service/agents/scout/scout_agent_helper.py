@@ -103,11 +103,36 @@ async def extract_business_info(page, index=0):
 
     return data
 
-async def scrape_google_maps(query):
+async def scrape_google_maps(query, headless=True):
+    """
+    Scrapes Google Maps for business information.
+    
+    Args:
+        query: Search query string
+        headless: Run browser in headless mode (True for production/cloud, False for debugging)
+    """
     async with async_playwright() as p:
-        # Launch browser (headless=False to see it working, set to True for production)
-        browser = await p.chromium.launch(headless=False)
-        context = await browser.new_context()
+        # Launch browser in headless mode for cloud deployment
+        # Additional args for running in containerized environments (Docker, Cloud Run, etc.)
+        browser = await p.chromium.launch(
+            headless=headless,
+            args=[
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-first-run',
+                '--no-zygote',
+                '--single-process',
+                '--disable-blink-features=AutomationControlled'
+            ]
+        )
+        
+        # Create context with realistic user agent to avoid detection
+        context = await browser.new_context(
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            viewport={'width': 1920, 'height': 1080}
+        )
         page = await context.new_page()
 
         # Navigate to Google Maps
