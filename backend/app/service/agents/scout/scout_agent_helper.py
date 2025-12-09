@@ -3,10 +3,14 @@ import random
 import re
 from playwright.async_api import async_playwright
 
-async def extract_business_info(page):
+async def extract_business_info(page, index=0):
     """
     Extracts data from the currently open business card in the side panel.
     Uses the new scraping strategy based on Google Maps HTML structure.
+    
+    Args:
+        page: Playwright page object
+        index: Index of the business card to extract (0-based)
     """
     data = {
         "org_name": None,
@@ -21,8 +25,8 @@ async def extract_business_info(page):
         # Wait for the business card to load
         await page.wait_for_selector('div[role="article"]', timeout=5000)
         
-        # Get the first article div (the business card)
-        business_card = page.locator('div[role="article"]').first
+        # Get the business card at the specified index
+        business_card = page.locator('div[role="article"]').nth(index)
         
         # 1. Organization Name - Extract from aria-label attribute
         try:
@@ -159,8 +163,8 @@ async def scrape_google_maps(query):
                 # Wait for the Details Panel to load (look for h1)
                 await page.wait_for_selector('h1', timeout=5000)
                 
-                # Scrape
-                business_data = await extract_business_info(page)
+                # Scrape - pass the index to extract the correct business card
+                business_data = await extract_business_info(page, index=i)
                 
                 # Log matching schema
                 print(f"Scraped {i+1}: {business_data['org_name']}")
