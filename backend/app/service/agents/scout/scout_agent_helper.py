@@ -98,13 +98,14 @@ async def extract_business_info(page, index=0):
 
     return data
 
-async def scrape_google_maps(query, headless=True):
+async def scrape_google_maps(query, headless=True, limit=10):
     """
     Scrapes Google Maps for business information.
     
     Args:
         query: Search query string
         headless: Run browser in headless mode (True for production/cloud, False for debugging)
+        limit: Maximum number of results to scrape (default: 10)
     """
     async with async_playwright() as p:
         # Launch browser in headless mode for cloud deployment
@@ -163,8 +164,7 @@ async def scrape_google_maps(query, headless=True):
 
         results = []
         
-        # Limit to 10
-        limit = 2
+        # Use the provided limit
         processed = 0
 
         # We iterate by index. Note: DOM might update, so we re-query or be careful.

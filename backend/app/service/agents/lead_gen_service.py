@@ -139,15 +139,8 @@ class LeadGenPipeline:
             logger.info("Step 1/3: Scout Agent - Discovering partners")
             scout_start = datetime.utcnow()
             
-            # Run Scout in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            discoveries = await loop.run_in_executor(
-                None,
-                self.scout.discover_partners,
-                city,
-                market,
-                district
-            )
+            # Run Scout agent (now async)
+            discoveries = await self.scout.discover_partners(city, market, district)
             
             scout_duration = (datetime.utcnow() - scout_start).total_seconds()
             logger.info(
@@ -161,83 +154,86 @@ class LeadGenPipeline:
                     f"Pipeline complete with empty results."
                 )
                 return []
+
+            print("discoveries")
+            print(discoveries)
             
             # Step 2: Researcher Agent - Enrich partners
             logger.info(f"Step 2/3: Researcher Agent - Enriching {len(discoveries)} partners")
-            researcher_start = datetime.utcnow()
+            # researcher_start = datetime.utcnow()
             
-            # Run Researcher in executor
-            enrichments = await loop.run_in_executor(
-                None,
-                self.researcher.enrich_partners,
-                discoveries
-            )
+            # # Run Researcher in executor
+            # enrichments = await loop.run_in_executor(
+            #     None,
+            #     self.researcher.enrich_partners,
+            #     discoveries
+            # )
             
-            researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
-            complete_count = sum(1 for e in enrichments if e.status == "complete")
-            logger.info(
-                f"Researcher Agent complete - {complete_count}/{len(enrichments)} complete "
-                f"in {researcher_duration:.2f}s"
-            )
+            # researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
+            # complete_count = sum(1 for e in enrichments if e.status == "complete")
+            # logger.info(
+            #     f"Researcher Agent complete - {complete_count}/{len(enrichments)} complete "
+            #     f"in {researcher_duration:.2f}s"
+            # )
             
-            # Step 3: Strategist Agent - Draft messages
-            logger.info(f"Step 3/3: Strategist Agent - Drafting messages for {len(enrichments)} partners")
-            strategist_start = datetime.utcnow()
+            # # Step 3: Strategist Agent - Draft messages
+            # logger.info(f"Step 3/3: Strategist Agent - Drafting messages for {len(enrichments)} partners")
+            # strategist_start = datetime.utcnow()
             
-            # Process each partner through Strategist
-            for discovery, enrichment in zip(discoveries, enrichments):
-                try:
-                    # Run Strategist in executor
-                    draft = await loop.run_in_executor(
-                        None,
-                        self.strategist.draft_message,
-                        discovery,
-                        enrichment,
-                        market,
-                        city
-                    )
+            # # Process each partner through Strategist
+            # for discovery, enrichment in zip(discoveries, enrichments):
+            #     try:
+            #         # Run Strategist in executor
+            #         draft = await loop.run_in_executor(
+            #             None,
+            #             self.strategist.draft_message,
+            #             discovery,
+            #             enrichment,
+            #             market,
+            #             city
+            #         )
                     
-                    # Format into LeadObject
-                    lead_object = self._format_lead_object(
-                        discovery,
-                        enrichment,
-                        draft,
-                        market,
-                        city
-                    )
+            #         # Format into LeadObject
+            #         lead_object = self._format_lead_object(
+            #             discovery,
+            #             enrichment,
+            #             draft,
+            #             market,
+            #             city
+            #         )
                     
-                    lead_objects.append(lead_object)
+            #         lead_objects.append(lead_object)
                     
-                    logger.debug(
-                        f"Lead object created for {discovery.entity_name} - "
-                        f"status: {enrichment.status}"
-                    )
+            #         logger.debug(
+            #             f"Lead object created for {discovery.entity_name} - "
+            #             f"status: {enrichment.status}"
+            #         )
                     
-                except Exception as e:
-                    logger.error(
-                        f"Failed to process partner {discovery.entity_name} - "
-                        f"Error: {str(e)} - Skipping this partner",
-                        exc_info=True
-                    )
-                    continue
+            #     except Exception as e:
+            #         logger.error(
+            #             f"Failed to process partner {discovery.entity_name} - "
+            #             f"Error: {str(e)} - Skipping this partner",
+            #             exc_info=True
+            #         )
+            #         continue
             
-            strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
-            logger.info(
-                f"Strategist Agent complete - generated {len(lead_objects)} drafts "
-                f"in {strategist_duration:.2f}s"
-            )
+            # strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
+            # logger.info(
+            #     f"Strategist Agent complete - generated {len(lead_objects)} drafts "
+            #     f"in {strategist_duration:.2f}s"
+            # )
             
-            # Log pipeline summary
-            total_duration = (datetime.utcnow() - start_time).total_seconds()
-            logger.info(
-                f"Pipeline execution complete - "
-                f"city: {city}, market: {market}, "
-                f"total_duration: {total_duration:.2f}s, "
-                f"leads_generated: {len(lead_objects)}, "
-                f"scout: {scout_duration:.2f}s, "
-                f"researcher: {researcher_duration:.2f}s, "
-                f"strategist: {strategist_duration:.2f}s"
-            )
+            # # Log pipeline summary
+            # total_duration = (datetime.utcnow() - start_time).total_seconds()
+            # logger.info(
+            #     f"Pipeline execution complete - "
+            #     f"city: {city}, market: {market}, "
+            #     f"total_duration: {total_duration:.2f}s, "
+            #     f"leads_generated: {len(lead_objects)}, "
+            #     f"scout: {scout_duration:.2f}s, "
+            #     f"researcher: {researcher_duration:.2f}s, "
+            #     f"strategist: {strategist_duration:.2f}s"
+            # )
             
             return lead_objects
             

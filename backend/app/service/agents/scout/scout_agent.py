@@ -8,10 +8,11 @@ website URLs, and entity types.
 
 import os
 import logging
+import asyncio
 from typing import List
-from ddgs import DDGS
 import google.generativeai as genai
 from app.model.lead_gen_model import PartnerDiscovery
+from app.service.agents.scout.scout_agent_helper import scrape_google_maps
 import json
 
 # Configure logging
@@ -48,13 +49,14 @@ class ScoutAgent:
         
         logger.info(f"Scout Agent initialized with model: {self.model_name}")
     
-    def _get_system_prompt(self, market: str, city: str, district:str) -> str:
+    def _get_system_prompt(self, market: str, city: str, district: str) -> str:
         """
         Generate system prompt based on market vertical.
         
         Args:
             market: Market vertical (Student Recruitment or Medical Tourism)
             city: Target city name
+            district: Target district name
             
         Returns:
             System prompt string for the agent
@@ -62,7 +64,7 @@ class ScoutAgent:
         base_prompt = f"""You are a Digital Scout AI agent. Your goal is to find "Channel Partners" in {city} who hold influence over our target audience."""
         
         if market == "Student Recruitment":
-            base_prompt += """For "Student Recruitment" market, search for:
+            base_prompt += """For "Student Recruitment" market, look for:
             - International High Schools (IB/IGCSE curriculum)
             - IELTS/TOEFL Coaching Centers
             - A-Level Tuition Centers
@@ -71,7 +73,7 @@ class ScoutAgent:
 
             """
         elif market == "Medical Tourism":
-            base_prompt += """For "Medical Tourism" market, search for:
+            base_prompt += """For "Medical Tourism" market, look for:
             - Diagnostic Centers (MRI/CT scan labs)
             - Specialist Clinics (Orthopedic, Cardiac, Dental)
             - Expat Community Centers
@@ -81,8 +83,8 @@ class ScoutAgent:
             """
         
         base_prompt += """Your task:
-        1. Analyze the search results provided
-        2. Extract entity name, website URL, and entity type
+        1. Analyze the Google Maps business data provided
+        2. Extract entity name, website URL, and entity type from the scraped data
         3. Return ONLY valid results with accessible websites
         4. Format as JSON array with structure: [{"entity_name": str, "website_url": str, "type": str}]
         5. Limit results to 3-10 partners
@@ -92,13 +94,14 @@ class ScoutAgent:
                 
         return base_prompt
     
-    def _generate_search_queries(self, city: str, market: str) -> List[str]:
+    def _generate_search_queries(self, city: str, market: str, district: str) -> List[str]:
         """
         Generate search queries based on city and market.
         
         Args:
             city: Target city name
             market: Market vertical
+            district: Target district name
             
         Returns:
             List of search query strings
@@ -107,89 +110,93 @@ class ScoutAgent:
         
         if market == "Student Recruitment":
             queries = [
-                f"international high schools {city}",
-                f"IELTS TOEFL coaching centers {city}",
-                f"A-Level tuition centers {city}",
-                f"study abroad consultants {city}",
+                f"international high schools {city}, {district}",
+                f"IELTS TOEFL coaching centers {city}, {district}",
+                f"A-Level tuition centers {city}, {district}",
+                f"study abroad consultants {city}, {district}",
             ]
         elif market == "Medical Tourism":
             queries = [
-                f"diagnostic centers, {city} {district}",
-                f"specialist clinics {city}",
-                f"medical tourism {city}",
-                f"expat health services {city}",
+                f"diagnostic centers {city}, {district}",
+                f"specialist clinics {city}, {district}",
+                f"medical tourism {city}, {district}",
+                f"expat health services {city}, {district}",
             ]
         
         return queries
     
-    def _search_duckduckgo(self, query: str, max_results: int = 10) -> List[dict]:
+    async def _scrape_google_maps(self, query: str, max_results: int = 10) -> List[dict]:
         """
-        Perform DuckDuckGo search and return results.
+        Perform Google Maps scraping and return business data.
         
         Args:
             query: Search query string
             max_results: Maximum number of results to return
             
         Returns:
-            List of search result dictionaries
+            List of scraped business data dictionaries
         """
         try:
-            logger.debug(f"Searching DuckDuckGo: {query}")
+            logger.debug(f"Scraping Google Maps: {query}")
             
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=max_results))
+            # Use the helper function to scrape Google Maps
+            results = await scrape_google_maps(query, headless=True, limit=max_results)
             
             logger.debug(f"Found {len(results)} results for query: {query}")
             return results
             
         except Exception as e:
             logger.error(
-                f"DuckDuckGo search failed - query: '{query}', error: {str(e)}",
+                f"Google Maps scraping failed - query: '{query}', error: {str(e)}",
                 exc_info=True
             )
             return []
     
     def _extract_partners_with_llm(
         self, 
-        search_results: List[dict], 
+        scraped_data: List, 
         city: str, 
         market: str,
         district: str
     ) -> List[PartnerDiscovery]:
         """
-        Use Gemini to extract structured partner data from search results.
+        Use Gemini to extract structured partner data from Google Maps scraped data.
         
         Args:
-            search_results: Raw search results from DuckDuckGo
+            scraped_data: Raw scraped business data from Google Maps
             city: Target city name
             market: Market vertical
+            district: Target district name
             
         Returns:
             List of PartnerDiscovery objects
         """
-        if not search_results:
-            logger.warning(f"No search results to process - city: {city}, market: {market}")
+        if not scraped_data:
+            logger.warning(f"No scraped data to process - city: {city}, market: {market}")
             return []
         
         try:
-            # Format search results for LLM
+            # Format scraped data for LLM
             formatted_results = "\n\n".join([
-                f"Title: {r.get('title', 'N/A')}\n"
-                f"URL: {r.get('href', 'N/A')}\n"
-                f"Description: {r.get('body', 'N/A')}"
-                for r in search_results[:20]  # Limit to top 20 results
+                f"Business Name: {data.org_name or 'N/A'}\n"
+                f"Website URL: {data.website_url or 'N/A'}\n"
+                f"Address: {data.address or 'N/A'}\n"
+                f"Phone: {data.primary_contact or 'N/A'}\n"
+                f"Review Score: {data.review_score or 'N/A'}\n"
+                f"Total Reviews: {data.total_reviews or 'N/A'}"
+                for data in scraped_data[:20]  # Limit to top 20 results
             ])
             
             system_prompt = self._get_system_prompt(market, city, district)
             
-            user_prompt = f"""Here are the search results for {market} partners in {city}:
+            user_prompt = f"""Here are the Google Maps business data for {market} partners in {city}:
 
             {formatted_results}
 
             Extract 3-10 potential partners and return as JSON array."""
             
             # Generate response
-            logger.debug(f"Sending {len(search_results)} results to Gemini for extraction")
+            logger.debug(f"Sending {len(scraped_data)} scraped businesses to Gemini for extraction")
             response = self.model.generate_content([system_prompt, user_prompt])
             
             # Parse JSON response
@@ -224,7 +231,7 @@ class ScoutAgent:
                     )
                     continue
             
-            logger.info(f"Extracted {len(partners)} partners from search results")
+            logger.info(f"Extracted {len(partners)} partners from scraped data")
             return partners
             
         except json.JSONDecodeError as e:
@@ -242,58 +249,46 @@ class ScoutAgent:
             )
             return []
     
-    def discover_partners(self, city: str, market: str, district:str) -> List[PartnerDiscovery]:
+    async def discover_partners(self, city: str, market: str, district: str) -> List[PartnerDiscovery]:
         """
-        Main method to discover partners for a given city and market.
+        Main method to discover partners for a given city and market using Google Maps scraping.
         
         Args:
             city: Target city name
             market: Market vertical (Student Recruitment or Medical Tourism)
+            district: Target district name
             
         Returns:
             List of 3-10 PartnerDiscovery objects, or empty list on failure
         """
-        logger.info(f"Starting partner discovery: city={city}, market={market}")
+        logger.info(f"Starting partner discovery: city={city}, market={market}, district={district}")
         
         try:
             # Generate search queries
-            queries = self._generate_search_queries(city, market)
+            queries = self._generate_search_queries(city, market, district)
             logger.info(f"Generated {len(queries)} search queries: {queries}")
             
-            # Collect search results from all queries
-            all_results = []
+            # Collect scraped data from all queries
+            all_scraped_data = []
             for query in queries:
-                results = self._search_duckduckgo(query, max_results=10)
-                all_results.extend(results)
+                logger.info(f"search query: {query} ")
+                scraped_data = await self._scrape_google_maps(query, max_results=2)
+                all_scraped_data.extend(scraped_data)
             
-            if not all_results:
+            if not all_scraped_data:
                 logger.warning(
-                    f"No search results found - city: {city}, market: {market}, "
+                    f"No scraped data found - city: {city}, market: {market}, district: {district}, "
                     f"queries: {queries}"
                 )
                 return []
             
-            logger.info(f"Collected {len(all_results)} total search results")
-            
-            # Extract structured partner data using LLM
-            partners = self._extract_partners_with_llm(all_results, city, market, district)
-            
-            if not partners:
-                logger.warning(
-                    f"No partners extracted - city: {city}, market: {market}, "
-                    f"search_results_count: {len(all_results)}"
-                )
-                return []
-            
-            logger.info(
-                f"Successfully discovered {len(partners)} partners - "
-                f"city: {city}, market: {market}"
-            )
-            return partners
+            logger.info(f"Collected {len(all_scraped_data)} total scraped businesses")
+        
+            return all_scraped_data
             
         except Exception as e:
             logger.error(
-                f"Partner discovery failed - city: {city}, market: {market}, "
+                f"Partner discovery failed - city: {city}, market: {market}, district: {district}, "
                 f"error: {str(e)}",
                 exc_info=True
             )
