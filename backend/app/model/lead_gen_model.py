@@ -20,6 +20,7 @@ class LeadGenRequest(BaseModel):
         city: Target city name for partner discovery
         market: Market vertical (Student Recruitment or Medical Tourism)
     """
+    district: str = Field(..., min_length=1, description="Target name of district or state")
     city: str = Field(..., min_length=1, description="Target city name")
     market: Literal["Student Recruitment", "Medical Tourism"] = Field(
         ..., description="Market vertical for partner discovery"

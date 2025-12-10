@@ -102,7 +102,8 @@ async def trigger_lead_generation(request: LeadGenRequest):
             pipeline.run_async(
                 job_id=job_id,
                 city=request.city.strip(),
-                market=request.market
+                market=request.market,
+                district=request.district
             )
         )
         

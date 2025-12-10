@@ -107,7 +107,7 @@ class LeadGenPipeline:
         
         return lead_object
     
-    async def execute(self, city: str, market: str) -> List[LeadObject]:
+    async def execute(self, city: str, market: str, district:str) -> List[LeadObject]:
         """
         Execute the full pipeline synchronously and return Lead Objects.
         
@@ -127,7 +127,7 @@ class LeadGenPipeline:
             asyncio.TimeoutError: If pipeline exceeds timeout limit
         """
         logger.info(
-            f"Starting pipeline execution - city: {city}, market: {market}, "
+            f"Starting pipeline execution - district:{district}, city: {city}, market: {market}, "
             f"timeout: {self.pipeline_timeout}s"
         )
         
@@ -145,7 +145,8 @@ class LeadGenPipeline:
                 None,
                 self.scout.discover_partners,
                 city,
-                market
+                market,
+                district
             )
             
             scout_duration = (datetime.utcnow() - scout_start).total_seconds()
@@ -264,7 +265,7 @@ class LeadGenPipeline:
             # Return partial results if any
             return lead_objects
     
-    async def run_async(self, job_id: str, city: str, market: str):
+    async def run_async(self, job_id: str, city: str, market: str, district:str):
         """
         Background task wrapper for async pipeline execution.
         
@@ -287,7 +288,7 @@ class LeadGenPipeline:
         try:
             # Execute pipeline with timeout
             lead_objects = await asyncio.wait_for(
-                self.execute(city, market),
+                self.execute(city, market, district),
                 timeout=self.pipeline_timeout
             )
             

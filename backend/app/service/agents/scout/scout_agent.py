@@ -48,7 +48,7 @@ class ScoutAgent:
         
         logger.info(f"Scout Agent initialized with model: {self.model_name}")
     
-    def _get_system_prompt(self, market: str, city: str) -> str:
+    def _get_system_prompt(self, market: str, city: str, district:str) -> str:
         """
         Generate system prompt based on market vertical.
         
@@ -114,7 +114,7 @@ class ScoutAgent:
             ]
         elif market == "Medical Tourism":
             queries = [
-                f"diagnostic centers {city}",
+                f"diagnostic centers, {city} {district}",
                 f"specialist clinics {city}",
                 f"medical tourism {city}",
                 f"expat health services {city}",
@@ -153,7 +153,8 @@ class ScoutAgent:
         self, 
         search_results: List[dict], 
         city: str, 
-        market: str
+        market: str,
+        district: str
     ) -> List[PartnerDiscovery]:
         """
         Use Gemini to extract structured partner data from search results.
@@ -179,7 +180,7 @@ class ScoutAgent:
                 for r in search_results[:20]  # Limit to top 20 results
             ])
             
-            system_prompt = self._get_system_prompt(market, city)
+            system_prompt = self._get_system_prompt(market, city, district)
             
             user_prompt = f"""Here are the search results for {market} partners in {city}:
 
@@ -241,7 +242,7 @@ class ScoutAgent:
             )
             return []
     
-    def discover_partners(self, city: str, market: str) -> List[PartnerDiscovery]:
+    def discover_partners(self, city: str, market: str, district:str) -> List[PartnerDiscovery]:
         """
         Main method to discover partners for a given city and market.
         
@@ -275,7 +276,7 @@ class ScoutAgent:
             logger.info(f"Collected {len(all_results)} total search results")
             
             # Extract structured partner data using LLM
-            partners = self._extract_partners_with_llm(all_results, city, market)
+            partners = self._extract_partners_with_llm(all_results, city, market, district)
             
             if not partners:
                 logger.warning(
