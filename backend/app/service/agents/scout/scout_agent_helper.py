@@ -2,6 +2,7 @@ import asyncio
 import random
 import re
 from playwright.async_api import async_playwright
+from app.model.lead_gen_model import ScrapedBusinessData
 
 async def extract_business_info(page, index=0):
     """
@@ -12,14 +13,8 @@ async def extract_business_info(page, index=0):
         page: Playwright page object
         index: Index of the business card to extract (0-based)
     """
-    data = {
-        "org_name": None,
-        "primary_contact": None,
-        "review_score": None,
-        "total_reviews": None,
-        "website_url": None,
-        "address": None
-    }
+
+    data = ScrapedBusinessData()
 
     try:
         # Wait for the business card to load
@@ -32,7 +27,7 @@ async def extract_business_info(page, index=0):
         try:
             aria_label = await business_card.get_attribute("aria-label")
             if aria_label:
-                data["org_name"] = aria_label.strip()
+                data.org_name = aria_label.strip()
         except Exception as e:
             print(f"Error extracting org_name: {e}")
 
@@ -40,7 +35,7 @@ async def extract_business_info(page, index=0):
         try:
             score_locator = business_card.locator('span.MW4etd[aria-hidden="true"]').first
             if await score_locator.count() > 0:
-                data["review_score"] = (await score_locator.inner_text()).strip()
+                data.review_score = (await score_locator.inner_text()).strip()
         except Exception as e:
             print(f"Error extracting review_score: {e}")
 
@@ -50,7 +45,7 @@ async def extract_business_info(page, index=0):
             if await reviews_locator.count() > 0:
                 reviews_text = await reviews_locator.inner_text()
                 # Remove parentheses and commas
-                data["total_reviews"] = reviews_text.strip().replace('(', '').replace(')', '').replace(',', '')
+                data.total_reviews = reviews_text.strip().replace('(', '').replace(')', '').replace(',', '')
         except Exception as e:
             print(f"Error extracting total_reviews: {e}")
 
@@ -72,10 +67,10 @@ async def extract_business_info(page, index=0):
                         span_content = await span.inner_text()
                         # Check if it looks like an address (contains numbers and street keywords)
                         if re.search(r'\d+\s+\w+\s+(Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Suite|Ste|#)', span_content, re.IGNORECASE):
-                            data["address"] = span_content.strip()
+                            data.address = span_content.strip()
                             break
                     
-                    if data["address"]:
+                    if data.address:
                         break
         except Exception as e:
             print(f"Error extracting address: {e}")
@@ -85,7 +80,7 @@ async def extract_business_info(page, index=0):
             website_link = business_card.locator('a.lcr4fd.S9kvJb').first
             if await website_link.count() > 0:
                 href = await website_link.get_attribute("href")
-                data["website_url"] = href
+                data.website_url = href
         except Exception as e:
             print(f"Error extracting website_url: {e}")
 
@@ -94,7 +89,7 @@ async def extract_business_info(page, index=0):
             phone_locator = business_card.locator('span.UsdlK').first
             if await phone_locator.count() > 0:
                 phone_text = await phone_locator.inner_text()
-                data["primary_contact"] = phone_text.strip()
+                data.primary_contact = phone_text.strip()
         except Exception as e:
             print(f"Error extracting phone: {e}")
 
@@ -192,7 +187,7 @@ async def scrape_google_maps(query, headless=True):
                 business_data = await extract_business_info(page, index=i)
                 
                 # Log matching schema
-                print(f"Scraped {i+1}: {business_data['org_name']}")
+                print(f"Scraped {i+1}: {business_data.org_name}")
                 results.append(business_data)
                 
                 processed += 1

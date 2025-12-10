@@ -156,5 +156,18 @@ class LeadObject(BaseModel):
 
 
 
+
 class SearchQuery(BaseModel):
     query: str
+
+
+class ScrapedBusinessData(BaseModel):
+    """
+    Raw data extracted from Google Maps business card.
+    """
+    org_name: Optional[str] = Field(None, description="Organization name")
+    primary_contact: Optional[str] = Field(None, description="Phone number")
+    review_score: Optional[str] = Field(None, description="Review score")
+    total_reviews: Optional[str] = Field(None, description="Total review count")
+    website_url: Optional[str] = Field(None, description="Website URL")
+    address: Optional[str] = Field(None, description="Physical address")
