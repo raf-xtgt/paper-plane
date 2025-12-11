@@ -9,7 +9,7 @@ import logging
 import asyncio
 import os
 import re
-from typing import List, Optional, Tuple, Dict, Any
+from typing import List, Optional, Tuple, Dict, Any, Union
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
 from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
 from crawl4ai.content_filter_strategy import PruningContentFilter
@@ -51,7 +51,7 @@ class NavigatorWebCrawler:
         self, 
         page_timeout: int = 60, 
         max_retries: int = 3, 
-        max_navigation_depth: int = 1,
+        max_navigation_depth: int = 3,
         enable_dynamic_content: bool = True,
         adaptive_scrolling: bool = True
     ):
@@ -731,6 +731,20 @@ class NavigatorWebCrawler:
                 logger.debug(f"No links found on main page for {entity_name}")
                 return None
             
+            # Check if links structure is valid
+            if isinstance(main_result.links, dict):
+                total_links = len(main_result.links.get('internal', [])) + len(main_result.links.get('external', []))
+                if total_links == 0:
+                    logger.debug(f"No links in internal/external arrays for {entity_name}")
+                    return None
+            elif isinstance(main_result.links, list):
+                if len(main_result.links) == 0:
+                    logger.debug(f"Empty links list for {entity_name}")
+                    return None
+            else:
+                logger.debug(f"Unexpected links format for {entity_name}: {type(main_result.links)}")
+                return None
+            
             # Find relevant pages using intelligent keyword matching
             relevant_links = self._find_relevant_pages(main_result.links)
             
@@ -807,7 +821,7 @@ class NavigatorWebCrawler:
             logger.warning(f"Failed to crawl relevant pages for {entity_name}: {e}")
             return None
     
-    def _find_relevant_pages(self, links: List[Dict[str, Any]]) -> List[str]:
+    def _find_relevant_pages(self, links: Union[Dict[str, List[Dict[str, Any]]], List[Dict[str, Any]]]) -> List[str]:
         """
         Identify Staff/Team/Contact pages using keyword matching with priority scoring.
         
@@ -817,7 +831,7 @@ class NavigatorWebCrawler:
         - Returns highest priority pages for navigation
         
         Args:
-            links: List of link dictionaries from Crawl4AI
+            links: Dictionary with 'external' and 'internal' keys containing lists of link dictionaries from Crawl4AI
             
         Returns:
             List of relevant URLs sorted by priority (highest first)
@@ -825,7 +839,46 @@ class NavigatorWebCrawler:
         relevant_links = []
         processed_urls = set()  # Prevent duplicate URLs
         
-        for link in links:
+        # Handle the new links structure with 'external' and 'internal' keys
+        all_links = []
+        
+        # Process internal links (prioritize these as they're on the same domain)
+        if isinstance(links, dict) and 'internal' in links:
+            internal_links = links.get('internal', [])
+            if isinstance(internal_links, list):
+                same_domain_internal = []
+                for int_link in internal_links:
+                    if isinstance(int_link, dict) and 'href' in int_link:
+                        same_domain_internal.append(int_link)
+
+                all_links.extend(internal_links)
+                logger.debug(f"Found {len(internal_links)} internal links")
+        
+        # Process external links (lower priority, but may include subdomains)
+        if isinstance(links, dict) and 'external' in links:
+            external_links = links.get('external', [])
+            if isinstance(external_links, list):
+                # Filter external links to only include same-domain or subdomain links
+                same_domain_external = []
+                for ext_link in external_links:
+                    if isinstance(ext_link, dict) and 'href' in ext_link:
+                        href = ext_link['href']
+                        # Only include external links that might be subdomains or same-site
+                        if not href.startswith(('tel:', 'mailto:', 'javascript:')):
+                            same_domain_external.append(ext_link)
+                
+                all_links.extend(same_domain_external)
+                logger.debug(f"Found {len(same_domain_external)} relevant external links out of {len(external_links)} total")
+        
+        # Fallback: if links is a list (old format), process directly
+        if isinstance(links, list):
+            all_links = links
+            logger.debug(f"Processing links in legacy list format: {len(all_links)} links")
+        
+        logger.debug(f"Processing {len(all_links)} total links for relevance")
+        
+        # Process all collected links
+        for link in all_links:
             if not isinstance(link, dict) or 'href' not in link:
                 continue
                 
@@ -872,13 +925,10 @@ class NavigatorWebCrawler:
         Returns:
             True if link should be skipped
         """
+        if not href:
+            return True
+            
         href_lower = href.lower()
-        
-        # Skip external links (different domain)
-        if href.startswith('http') and not any(domain in href_lower for domain in ['localhost', '127.0.0.1']):
-            # Allow external links only if they're subdomains of the current site
-            # This is a simplified check - in production, you'd want more sophisticated domain matching
-            pass
         
         # Skip non-web protocols
         if any(protocol in href_lower for protocol in ['mailto:', 'tel:', 'javascript:', 'ftp:', '#']):
@@ -893,6 +943,10 @@ class NavigatorWebCrawler:
         social_domains = ['facebook.com', 'twitter.com', 'linkedin.com', 'instagram.com', 
                          'youtube.com', 'tiktok.com', 'whatsapp.com']
         if any(domain in href_lower for domain in social_domains):
+            return True
+        
+        # Skip anchor links (fragments)
+        if href.startswith('#'):
             return True
         
         return False
