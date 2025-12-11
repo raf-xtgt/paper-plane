@@ -1,8 +1,8 @@
 """
 Lead Generation Pipeline Service - ADK Sequential Agent Orchestration.
 
-This service orchestrates the Scout, Researcher, and Strategist agents in sequence
-to discover, enrich, and draft outreach messages for potential channel partners.
+This service orchestrates the Scout, Navigator, Researcher, and Strategist agents in sequence
+to discover, extract contact information, enrich, and draft outreach messages for potential channel partners.
 The pipeline executes asynchronously with timeout handling and comprehensive logging.
 """
 
@@ -12,6 +12,7 @@ import asyncio
 from typing import List
 from datetime import datetime
 from app.service.agents.scout.scout_agent import ScoutAgent
+from app.service.agents.navigator.navigator_agent import NavigatorAgent
 from app.service.agents.researcher_agent import ResearcherAgent
 from app.service.agents.strategist_agent import StrategistAgent
 from app.util.confluent.lead_gen_producer import LeadGenProducer
@@ -21,7 +22,8 @@ from app.model.lead_gen_model import (
     AIContext,
     PartnerDiscovery,
     PartnerEnrichment,
-    OutreachDraft
+    OutreachDraft,
+    ScrapedBusinessData
 )
 
 # Configure logging
@@ -30,22 +32,24 @@ logger = logging.getLogger("lead_gen_pipeline")
 
 class LeadGenPipeline:
     """
-    Lead Generation Pipeline orchestrating Scout, Researcher, and Strategist agents.
+    Lead Generation Pipeline orchestrating Scout, Navigator, Researcher, and Strategist agents.
     
     This class implements the ADK sequential agent pattern, executing agents in order:
     1. Scout Agent: Discovers 3-10 potential partners
-    2. Researcher Agent: Enriches each partner with contact details
-    3. Strategist Agent: Generates personalized outreach messages
+    2. Navigator Agent: Extracts decision-maker contact information from partner websites
+    3. Researcher Agent: Enriches each partner with additional contact details
+    4. Strategist Agent: Generates personalized outreach messages
     
     The pipeline includes timeout handling, error recovery, and comprehensive logging.
     """
     
     def __init__(self):
-        """Initialize the pipeline with all three agents."""
+        """Initialize the pipeline with all four agents."""
         logger.info("Initializing Lead Generation Pipeline")
         
         # Initialize agents
         self.scout = ScoutAgent()
+        self.navigator = NavigatorAgent()
         self.researcher = ResearcherAgent()
         self.strategist = StrategistAgent()
         
@@ -57,8 +61,81 @@ class LeadGenPipeline:
         
         logger.info(
             f"Pipeline initialized - timeout: {self.pipeline_timeout}s, "
-            f"agents: Scout, Researcher, Strategist"
+            f"agents: Scout, Navigator, Researcher, Strategist"
         )
+    
+    def _convert_discoveries_to_scraped_data(
+        self, 
+        discoveries: List[PartnerDiscovery]
+    ) -> List[ScrapedBusinessData]:
+        """
+        Convert PartnerDiscovery objects to ScrapedBusinessData for Navigator Agent.
+        
+        Args:
+            discoveries: List of PartnerDiscovery from Scout Agent
+            
+        Returns:
+            List of ScrapedBusinessData for Navigator Agent processing
+        """
+        scraped_data = []
+        for discovery in discoveries:
+            scraped_data.append(ScrapedBusinessData(
+                org_name=discovery.entity_name,
+                website_url=str(discovery.website_url)
+            ))
+        return scraped_data
+    
+    def _merge_enrichments(
+        self,
+        navigator_enrichments: List[PartnerEnrichment],
+        researcher_enrichments: List[PartnerEnrichment]
+    ) -> List[PartnerEnrichment]:
+        """
+        Merge Navigator and Researcher enrichments, prioritizing Navigator's contact data.
+        
+        Navigator Agent provides decision_maker and contact_info from website crawling.
+        Researcher Agent provides additional enrichment and fallback data.
+        
+        Args:
+            navigator_enrichments: Enrichments from Navigator Agent
+            researcher_enrichments: Enrichments from Researcher Agent
+            
+        Returns:
+            List of merged PartnerEnrichment objects
+        """
+        merged = []
+        
+        # Ensure both lists have the same length
+        min_length = min(len(navigator_enrichments), len(researcher_enrichments))
+        
+        for i in range(min_length):
+            nav_enrichment = navigator_enrichments[i]
+            res_enrichment = researcher_enrichments[i]
+            
+            # Prioritize Navigator data for decision_maker and contact_info
+            # Use Researcher data as fallback and for additional fields
+            merged_enrichment = PartnerEnrichment(
+                decision_maker=nav_enrichment.decision_maker or res_enrichment.decision_maker,
+                contact_info=nav_enrichment.contact_info or res_enrichment.contact_info,
+                contact_channel=nav_enrichment.contact_channel or res_enrichment.contact_channel,
+                key_fact=nav_enrichment.key_fact or res_enrichment.key_fact,
+                verified_url=nav_enrichment.verified_url,
+                status="complete" if (
+                    (nav_enrichment.decision_maker or res_enrichment.decision_maker) and
+                    (nav_enrichment.contact_info or res_enrichment.contact_info)
+                ) else "incomplete"
+            )
+            
+            merged.append(merged_enrichment)
+        
+        # Handle any remaining enrichments if lists are different lengths
+        if len(navigator_enrichments) > min_length:
+            merged.extend(navigator_enrichments[min_length:])
+        elif len(researcher_enrichments) > min_length:
+            merged.extend(researcher_enrichments[min_length:])
+        
+        logger.debug(f"Merged {len(merged)} enrichments from Navigator and Researcher agents")
+        return merged
     
     def _format_lead_object(
         self,
@@ -111,14 +188,16 @@ class LeadGenPipeline:
         """
         Execute the full pipeline synchronously and return Lead Objects.
         
-        This method runs all three agents in sequence:
+        This method runs all four agents in sequence:
         1. Scout discovers partners
-        2. Researcher enriches each partner
-        3. Strategist drafts messages for each partner
+        2. Navigator extracts decision-maker contact information from partner websites
+        3. Researcher enriches each partner with additional contact details
+        4. Strategist drafts messages for each partner
         
         Args:
             city: Target city name
             market: Market vertical (Student Recruitment or Medical Tourism)
+            district: Target district name
             
         Returns:
             List of LeadObject instances ready for Kafka publishing
@@ -136,7 +215,7 @@ class LeadGenPipeline:
         
         try:
             # Step 1: Scout Agent - Discover partners
-            logger.info("Step 1/3: Scout Agent - Discovering partners")
+            logger.info("Step 1/4: Scout Agent - Discovering partners")
             scout_start = datetime.utcnow()
             
             # Run Scout agent (now async)
@@ -158,30 +237,52 @@ class LeadGenPipeline:
             print("discoveries")
             print(discoveries)
             
-            # Step 2: Researcher Agent - Enrich partners
-            logger.info(f"Step 2/3: Researcher Agent - Enriching {len(discoveries)} partners")
+            # Step 2: Navigator Agent - Extract contact information from websites
+            logger.info(f"Step 2/4: Navigator Agent - Extracting contact info from {len(discoveries)} partner websites")
+            navigator_start = datetime.utcnow()
+            
+            # Convert discoveries to scraped data format for Navigator Agent
+            scraped_data = self._convert_discoveries_to_scraped_data(discoveries)
+            
+            # Run Navigator Agent (async)
+            enrichments = await self.navigator.navigate_and_extract_batch(scraped_data)
+            
+            navigator_duration = (datetime.utcnow() - navigator_start).total_seconds()
+            complete_count = sum(1 for e in enrichments if e.status == "complete")
+            logger.info(
+                f"Navigator Agent complete - {complete_count}/{len(enrichments)} complete "
+                f"in {navigator_duration:.2f}s"
+            )
+            
+            # Step 3: Researcher Agent - Enrich partners with additional details
+            logger.info(f"Step 3/4: Researcher Agent - Enriching {len(discoveries)} partners")
             researcher_start = datetime.utcnow()
             
-            # Run Researcher in executor
-            enrichments = await loop.run_in_executor(
+            # Run Researcher in executor - pass both discoveries and navigator enrichments
+            loop = asyncio.get_event_loop()
+            final_enrichments = await loop.run_in_executor(
                 None,
                 self.researcher.enrich_partners,
                 discoveries
             )
             
+            # Merge Navigator enrichments with Researcher enrichments
+            # Navigator provides decision_maker and contact_info, Researcher provides additional enrichment
+            merged_enrichments = self._merge_enrichments(enrichments, final_enrichments)
+            
             researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
-            complete_count = sum(1 for e in enrichments if e.status == "complete")
+            complete_count = sum(1 for e in merged_enrichments if e.status == "complete")
             logger.info(
-                f"Researcher Agent complete - {complete_count}/{len(enrichments)} complete "
+                f"Researcher Agent complete - {complete_count}/{len(merged_enrichments)} complete "
                 f"in {researcher_duration:.2f}s"
             )
             
-            # Step 3: Strategist Agent - Draft messages
-            logger.info(f"Step 3/3: Strategist Agent - Drafting messages for {len(enrichments)} partners")
+            # Step 4: Strategist Agent - Draft messages
+            logger.info(f"Step 4/4: Strategist Agent - Drafting messages for {len(merged_enrichments)} partners")
             strategist_start = datetime.utcnow()
             
             # Process each partner through Strategist
-            for discovery, enrichment in zip(discoveries, enrichments):
+            for discovery, enrichment in zip(discoveries, merged_enrichments):
                 try:
                     # Run Strategist in executor
                     draft = await loop.run_in_executor(
@@ -231,6 +332,7 @@ class LeadGenPipeline:
                 f"total_duration: {total_duration:.2f}s, "
                 f"leads_generated: {len(lead_objects)}, "
                 f"scout: {scout_duration:.2f}s, "
+                f"navigator: {navigator_duration:.2f}s, "
                 f"researcher: {researcher_duration:.2f}s, "
                 f"strategist: {strategist_duration:.2f}s"
             )
