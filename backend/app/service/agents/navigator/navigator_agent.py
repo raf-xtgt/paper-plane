@@ -159,31 +159,29 @@ class NavigatorAgent:
         logger.info(f"Processing {entity_name} at {website_url}")
         
         try:
-            # Apply timeout to the entire processing operation
-            async with asyncio.timeout(self.timeout):
-                # Step 1: Crawl website and get content
-                markdown_content, verified_url = await self.web_crawler.crawl_website(
-                    website_url, entity_name
-                )
-                
-                # Step 2: Extract contact information using LLM
-                extracted_data = await self.content_extractor.extract_contact_info(
-                    markdown_content, entity_name, verified_url
-                )
-                
-                # Step 3: Validate and create PartnerEnrichment
-                enrichment = self.data_validator.validate_partner_enrichment(
-                    extracted_data, verified_url
-                )
-                
-                duration = asyncio.get_event_loop().time() - start_time
-                logger.info(
-                    f"Successfully processed {entity_name} in {duration:.2f}s - "
-                    f"Status: {enrichment.status}"
-                )
-                
-                return enrichment
-            
+            # Step 1: Crawl website and get content
+            markdown_content, verified_url = await self.web_crawler.crawl_website(
+                website_url, entity_name
+            )
+
+            # Step 2: Extract contact information using LLM
+            extracted_data = await self.content_extractor.extract_contact_info(
+                markdown_content, entity_name, verified_url
+            )
+
+            # Step 3: Validate and create PartnerEnrichment
+            enrichment = self.data_validator.validate_partner_enrichment(
+                extracted_data, verified_url
+            )
+
+            duration = asyncio.get_event_loop().time() - start_time
+            logger.info(
+                f"Successfully processed {entity_name} in {duration:.2f}s - "
+                f"Status: {enrichment.status}"
+            )
+
+            return enrichment
+
         except asyncio.TimeoutError:
             logger.error(f"Timeout processing {entity_name} after {self.timeout}s")
             return PartnerEnrichment(

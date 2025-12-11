@@ -11,10 +11,19 @@ import os
 import re
 from typing import List, Optional, Tuple, Dict, Any
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
 from crawl4ai.content_filter_strategy import PruningContentFilter
 
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.navigator.webcrawler")
+
+# Ensure logger is properly configured
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
 
 
 class NavigatorWebCrawler:
@@ -117,6 +126,13 @@ class NavigatorWebCrawler:
         Returns:
             Tuple of (markdown_content, verified_url)
         """
+        # Validate inputs
+        if not website_url or not entity_name:
+            error_msg = f"Invalid inputs: website_url='{website_url}', entity_name='{entity_name}'"
+            logger.error(error_msg)
+            return self._create_fallback_content(website_url or "unknown", entity_name or "unknown"), website_url or "unknown"
+        
+        logger.debug(f"Starting crawl for {entity_name} at {website_url}")
         last_exception = None
         
         # Try crawling with retries and different user agents
@@ -127,15 +143,20 @@ class NavigatorWebCrawler:
                 # Configure crawler for this attempt
                 crawler = self._configure_crawler(attempt)
                 
-                async with crawler:
+                if crawler is None:
+                    raise Exception("Failed to configure crawler")
+                
+                # Try to use the crawler with proper error handling
+                try:
                     # Initial crawl with basic dynamic content handling
                     result = await crawler.arun(
                         url=website_url,
                         config=self._get_crawler_config()
                     )
                     
-                    if not result.success:
-                        raise Exception(f"Crawl failed: {result.error_message}")
+                    if not result or not result.success:
+                        error_msg = getattr(result, 'error_message', 'Unknown crawl error') if result else 'No result returned'
+                        raise Exception(f"Crawl failed: {error_msg}")
                     
                     verified_url = result.url
                     main_content = result.markdown or ""
@@ -186,6 +207,10 @@ class NavigatorWebCrawler:
                     logger.info(f"Successfully crawled {entity_name}: {len(combined_content)} characters")
                     return combined_content, verified_url
                     
+                except Exception as crawl_error:
+                    # Re-raise the crawl error to be handled by the outer exception handler
+                    raise crawl_error
+                    
             except Exception as e:
                 last_exception = e
                 logger.warning(f"Crawling attempt {attempt + 1} failed for {entity_name}: {e}")
@@ -202,7 +227,7 @@ class NavigatorWebCrawler:
         # Return minimal content to allow processing to continue
         return self._create_fallback_content(website_url, entity_name), website_url
     
-    def _configure_crawler(self, attempt: int = 0) -> AsyncWebCrawler:
+    def _configure_crawler(self, attempt: int = 0) -> Optional[AsyncWebCrawler]:
         """
         Configure Crawl4AI with optimal settings for bot detection avoidance.
         
@@ -210,35 +235,51 @@ class NavigatorWebCrawler:
             attempt: Retry attempt number for user agent rotation
             
         Returns:
-            Configured AsyncWebCrawler instance
+            Configured AsyncWebCrawler instance or None if configuration fails
         """
-        # Select user agent for this attempt
-        user_agent = None
-        if attempt < len(self.user_agents):
-            user_agent = self.user_agents[attempt]
-        
-        browser_config = BrowserConfig(
-            headless=self.headless,
-            java_script_enabled=True,
-            use_persistent_context=True,
-            user_agent_mode=self.user_agent_mode if not user_agent else "custom",
-            user_agent=user_agent,
-            enable_stealth=self.stealth_mode,
-            viewport_width=1920,
-            viewport_height=1080,
-            # Additional anti-detection measures
-            ignore_https_errors=True,
-            extra_args=[
-                "--no-sandbox",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=VizDisplayCompositor"
-            ]
-        )
-        
-        return AsyncWebCrawler(
-            browser_config=browser_config,
-            verbose=False
-        )
+        try:
+            logger.debug(f"Configuring crawler for attempt {attempt + 1}")
+            
+            # Create crawler with minimal configuration first
+            try:
+                crawler = AsyncWebCrawler(verbose=False)
+                logger.debug("Successfully created basic AsyncWebCrawler")
+                return crawler
+            except Exception as basic_error:
+                logger.warning(f"Basic crawler creation failed: {basic_error}, trying with browser config")
+            
+            # If basic creation fails, try with browser configuration
+            # Select user agent for this attempt
+            user_agent = None
+            if attempt < len(self.user_agents):
+                user_agent = self.user_agents[attempt]
+            
+            # Simplified browser configuration to avoid potential issues
+            config = BrowserConfig(
+                headless=self.headless,
+                java_script_enabled=True,
+                user_agent=user_agent,
+                viewport_width=1920,
+                viewport_height=1080,
+                ignore_https_errors=True
+            )
+            
+            # Create crawler with browser configuration
+            crawler = AsyncWebCrawler(
+                browser_config=config,
+                verbose=False
+            )
+            
+            if crawler is None:
+                logger.error("Failed to create AsyncWebCrawler instance")
+                return None
+                
+            logger.debug("Successfully created configured AsyncWebCrawler")
+            return crawler
+            
+        except Exception as e:
+            logger.error(f"Failed to configure crawler: {e}")
+            return None
     
     def _get_crawler_config(self, enhanced_dynamic_handling: bool = False) -> CrawlerRunConfig:
         """
@@ -275,13 +316,7 @@ class NavigatorWebCrawler:
                 ".modal, .overlay, .sidebar, .breadcrumb, "
                 "script, style, noscript, .social-media, .share-buttons"
             ),
-            
-            # Use content filter for cleaning while preserving dynamic content
-            content_filter=PruningContentFilter(
-                threshold=0.45,  # Slightly lower threshold to capture more dynamic content
-                threshold_type="fixed",
-                min_word_threshold=8  # Lower threshold for dynamic content fragments
-            ),
+
             
             # Enhanced virtual scrolling configuration for dynamic content (Requirement 2.3)
             scroll_delay=3,  # Increased delay for dynamic content loading
@@ -334,6 +369,11 @@ class NavigatorWebCrawler:
             Crawl result with enhanced dynamic content or None
         """
         try:
+            # Check if crawler is valid
+            if crawler is None:
+                logger.warning(f"Crawler is None, cannot handle dynamic content for {entity_name}")
+                return None
+            
             # Use enhanced configuration for detected SPAs
             config = self._get_crawler_config(enhanced_dynamic_handling=is_spa_detected)
             
@@ -442,6 +482,11 @@ class NavigatorWebCrawler:
             Crawl result with comprehensive lazy-loaded content
         """
         try:
+            # Check if crawler is valid
+            if crawler is None:
+                logger.warning(f"Crawler is None, cannot handle lazy loading content for {entity_name}")
+                return None
+            
             logger.debug(f"Handling lazy loading content for {entity_name}")
             
             # Configure for aggressive lazy loading handling
@@ -625,6 +670,11 @@ class NavigatorWebCrawler:
             Optimized crawl result
         """
         try:
+            # Check if crawler is valid
+            if crawler is None:
+                logger.warning(f"Crawler is None, cannot apply adaptive strategy for {entity_name}")
+                return None
+            
             logger.debug(f"Applying adaptive strategy for {entity_name}: {patterns}")
             
             # Choose strategy based on detected patterns
@@ -671,6 +721,11 @@ class NavigatorWebCrawler:
             Content from relevant pages or None
         """
         try:
+            # Check if crawler is valid
+            if crawler is None:
+                logger.warning(f"Crawler is None, cannot crawl relevant pages for {entity_name}")
+                return None
+            
             # Extract links from main page
             if not main_result.links:
                 logger.debug(f"No links found on main page for {entity_name}")
