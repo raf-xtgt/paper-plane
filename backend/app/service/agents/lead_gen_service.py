@@ -222,7 +222,9 @@ class LeadGenPipeline:
                 f"Navigator Agent complete - {complete_count}/{len(navigator_enrichments)} complete "
                 f"in {navigator_duration:.2f}s"
             )
-            
+            print("navigator_enrichments")
+            print(navigator_enrichments)
+
             # Step 3: Researcher Agent - Enhance Navigator enrichments with additional details
             logger.info(f"Step 3/4: Researcher Agent - Enhancing {len(navigator_enrichments)} Navigator enrichments")
         #     researcher_start = datetime.utcnow()

@@ -119,8 +119,8 @@ class ScoutAgent:
             queries = [
                 f"diagnostic centers {city}, {district}",
                 f"specialist clinics {city}, {district}",
-                f"medical tourism {city}, {district}",
-                f"expat health services {city}, {district}",
+                # f"medical tourism {city}, {district}",
+                # f"expat health services {city}, {district}",
             ]
         
         return queries
