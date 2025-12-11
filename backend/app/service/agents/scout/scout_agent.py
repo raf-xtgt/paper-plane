@@ -11,7 +11,7 @@ import logging
 import asyncio
 from typing import List
 import google.generativeai as genai
-from app.model.lead_gen_model import PartnerDiscovery
+from app.model.lead_gen_model import PartnerDiscovery, ScrapedBusinessData
 from app.service.agents.scout.scout_agent_helper import scrape_google_maps
 import json
 
@@ -249,7 +249,7 @@ class ScoutAgent:
             )
             return []
     
-    async def discover_partners(self, city: str, market: str, district: str) -> List[PartnerDiscovery]:
+    async def discover_partners(self, city: str, market: str, district: str) -> List[ScrapedBusinessData]:
         """
         Main method to discover partners for a given city and market using Google Maps scraping.
         
@@ -259,7 +259,7 @@ class ScoutAgent:
             district: Target district name
             
         Returns:
-            List of 3-10 PartnerDiscovery objects, or empty list on failure
+            List of 3-10 ScrapedBusinessData objects, or empty list on failure
         """
         logger.info(f"Starting partner discovery: city={city}, market={market}, district={district}")
         

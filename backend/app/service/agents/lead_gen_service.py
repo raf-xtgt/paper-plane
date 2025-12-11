@@ -64,79 +64,40 @@ class LeadGenPipeline:
             f"agents: Scout, Navigator, Researcher, Strategist"
         )
     
-    def _convert_discoveries_to_scraped_data(
+    def _convert_scraped_data_to_discoveries(
         self, 
-        discoveries: List[PartnerDiscovery]
-    ) -> List[ScrapedBusinessData]:
+        scraped_data: List[ScrapedBusinessData]
+    ) -> List[PartnerDiscovery]:
         """
-        Convert PartnerDiscovery objects to ScrapedBusinessData for Navigator Agent.
+        Convert ScrapedBusinessData objects to PartnerDiscovery for Strategist Agent.
         
         Args:
-            discoveries: List of PartnerDiscovery from Scout Agent
+            scraped_data: List of ScrapedBusinessData from Scout Agent
             
         Returns:
-            List of ScrapedBusinessData for Navigator Agent processing
+            List of PartnerDiscovery for Strategist Agent processing
         """
-        scraped_data = []
-        for discovery in discoveries:
-            scraped_data.append(ScrapedBusinessData(
-                org_name=discovery.entity_name,
-                website_url=str(discovery.website_url)
+        discoveries = []
+        for data in scraped_data:
+            # Determine entity type based on org_name or use default
+            entity_type = "Business"  # Default type
+            if data.org_name:
+                name_lower = data.org_name.lower()
+                if any(keyword in name_lower for keyword in ["school", "college", "university", "academy"]):
+                    entity_type = "Educational Institution"
+                elif any(keyword in name_lower for keyword in ["hospital", "clinic", "medical", "diagnostic", "health"]):
+                    entity_type = "Medical Facility"
+                elif any(keyword in name_lower for keyword in ["coaching", "training", "institute", "center"]):
+                    entity_type = "Training Center"
+            
+            discoveries.append(PartnerDiscovery(
+                entity_name=data.org_name or "Unknown Business",
+                website_url=data.website_url,
+                type=entity_type
             ))
-        return scraped_data
+        return discoveries
     
-    def _merge_enrichments(
-        self,
-        navigator_enrichments: List[PartnerEnrichment],
-        researcher_enrichments: List[PartnerEnrichment]
-    ) -> List[PartnerEnrichment]:
-        """
-        Merge Navigator and Researcher enrichments, prioritizing Navigator's contact data.
-        
-        Navigator Agent provides decision_maker and contact_info from website crawling.
-        Researcher Agent provides additional enrichment and fallback data.
-        
-        Args:
-            navigator_enrichments: Enrichments from Navigator Agent
-            researcher_enrichments: Enrichments from Researcher Agent
-            
-        Returns:
-            List of merged PartnerEnrichment objects
-        """
-        merged = []
-        
-        # Ensure both lists have the same length
-        min_length = min(len(navigator_enrichments), len(researcher_enrichments))
-        
-        for i in range(min_length):
-            nav_enrichment = navigator_enrichments[i]
-            res_enrichment = researcher_enrichments[i]
-            
-            # Prioritize Navigator data for decision_maker and contact_info
-            # Use Researcher data as fallback and for additional fields
-            merged_enrichment = PartnerEnrichment(
-                decision_maker=nav_enrichment.decision_maker or res_enrichment.decision_maker,
-                contact_info=nav_enrichment.contact_info or res_enrichment.contact_info,
-                contact_channel=nav_enrichment.contact_channel or res_enrichment.contact_channel,
-                key_fact=nav_enrichment.key_fact or res_enrichment.key_fact,
-                verified_url=nav_enrichment.verified_url,
-                status="complete" if (
-                    (nav_enrichment.decision_maker or res_enrichment.decision_maker) and
-                    (nav_enrichment.contact_info or res_enrichment.contact_info)
-                ) else "incomplete"
-            )
-            
-            merged.append(merged_enrichment)
-        
-        # Handle any remaining enrichments if lists are different lengths
-        if len(navigator_enrichments) > min_length:
-            merged.extend(navigator_enrichments[min_length:])
-        elif len(researcher_enrichments) > min_length:
-            merged.extend(researcher_enrichments[min_length:])
-        
-        logger.debug(f"Merged {len(merged)} enrichments from Navigator and Researcher agents")
-        return merged
-    
+
     def _format_lead_object(
         self,
         discovery: PartnerDiscovery,
@@ -218,136 +179,192 @@ class LeadGenPipeline:
             logger.info("Step 1/4: Scout Agent - Discovering partners")
             scout_start = datetime.utcnow()
             
-            # Run Scout agent (now async)
-            discoveries = await self.scout.discover_partners(city, market, district)
+            # Run Scout agent (now async) - returns ScrapedBusinessData
+            scraped_data = await self.scout.discover_partners(city, market, district)
             
             scout_duration = (datetime.utcnow() - scout_start).total_seconds()
             logger.info(
-                f"Scout Agent complete - found {len(discoveries)} partners "
+                f"Scout Agent complete - found {len(scraped_data)} partners "
                 f"in {scout_duration:.2f}s"
             )
             
-            if not discoveries:
+            if not scraped_data:
                 logger.warning(
                     f"Scout Agent returned no partners - city: {city}, market: {market}. "
                     f"Pipeline complete with empty results."
                 )
                 return []
 
-            print("discoveries")
-            print(discoveries)
+            print("scraped_data")
+            print(scraped_data)
             
             # Step 2: Navigator Agent - Extract contact information from websites
-            logger.info(f"Step 2/4: Navigator Agent - Extracting contact info from {len(discoveries)} partner websites")
+            logger.info(f"Step 2/4: Navigator Agent - Extracting contact info from {len(scraped_data)} partner websites")
             navigator_start = datetime.utcnow()
             
-            # Convert discoveries to scraped data format for Navigator Agent
-            scraped_data = self._convert_discoveries_to_scraped_data(discoveries)
+            # Validate scraped data before passing to Navigator Agent
+            valid_scraped_data = [data for data in scraped_data if data.website_url]
+            if len(valid_scraped_data) != len(scraped_data):
+                logger.warning(
+                    f"Filtered out {len(scraped_data) - len(valid_scraped_data)} partners without valid website URLs"
+                )
             
-            # Run Navigator Agent (async)
-            enrichments = await self.navigator.navigate_and_extract_batch(scraped_data)
+            if not valid_scraped_data:
+                logger.warning("No partners with valid website URLs found after validation")
+                return []
+            
+            # Run Navigator Agent (async) - use validated scraped_data from Scout
+            navigator_enrichments = await self.navigator.navigate_and_extract_batch(valid_scraped_data)
             
             navigator_duration = (datetime.utcnow() - navigator_start).total_seconds()
-            complete_count = sum(1 for e in enrichments if e.status == "complete")
+            complete_count = sum(1 for e in navigator_enrichments if e.status == "complete")
             logger.info(
-                f"Navigator Agent complete - {complete_count}/{len(enrichments)} complete "
+                f"Navigator Agent complete - {complete_count}/{len(navigator_enrichments)} complete "
                 f"in {navigator_duration:.2f}s"
             )
             
-            # Step 3: Researcher Agent - Enrich partners with additional details
-            logger.info(f"Step 3/4: Researcher Agent - Enriching {len(discoveries)} partners")
-            researcher_start = datetime.utcnow()
+            # Step 3: Researcher Agent - Enhance Navigator enrichments with additional details
+            logger.info(f"Step 3/4: Researcher Agent - Enhancing {len(navigator_enrichments)} Navigator enrichments")
+        #     researcher_start = datetime.utcnow()
             
-            # Run Researcher in executor - pass both discoveries and navigator enrichments
-            loop = asyncio.get_event_loop()
-            final_enrichments = await loop.run_in_executor(
-                None,
-                self.researcher.enrich_partners,
-                discoveries
-            )
+        #     # Validate Navigator enrichments before passing to Researcher Agent
+        #     if not navigator_enrichments:
+        #         logger.warning("Navigator Agent returned no enrichments")
+        #         return []
             
-            # Merge Navigator enrichments with Researcher enrichments
-            # Navigator provides decision_maker and contact_info, Researcher provides additional enrichment
-            merged_enrichments = self._merge_enrichments(enrichments, final_enrichments)
+        #     # Ensure all Navigator enrichments have valid URLs
+        #     valid_navigator_enrichments = [
+        #         e for e in navigator_enrichments 
+        #         if e.verified_url and str(e.verified_url).startswith(('http://', 'https://'))
+        #     ]
             
-            researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
-            complete_count = sum(1 for e in merged_enrichments if e.status == "complete")
-            logger.info(
-                f"Researcher Agent complete - {complete_count}/{len(merged_enrichments)} complete "
-                f"in {researcher_duration:.2f}s"
-            )
+        #     if len(valid_navigator_enrichments) != len(navigator_enrichments):
+        #         logger.warning(
+        #             f"Filtered out {len(navigator_enrichments) - len(valid_navigator_enrichments)} "
+        #             f"Navigator enrichments with invalid URLs"
+        #         )
             
-            # Step 4: Strategist Agent - Draft messages
-            logger.info(f"Step 4/4: Strategist Agent - Drafting messages for {len(merged_enrichments)} partners")
-            strategist_start = datetime.utcnow()
+        #     if not valid_navigator_enrichments:
+        #         logger.warning("No valid Navigator enrichments found after validation")
+        #         return []
             
-            # Process each partner through Strategist
-            for discovery, enrichment in zip(discoveries, merged_enrichments):
-                try:
-                    # Run Strategist in executor
-                    draft = await loop.run_in_executor(
-                        None,
-                        self.strategist.draft_message,
-                        discovery,
-                        enrichment,
-                        market,
-                        city
-                    )
+        #     # Run Researcher in executor - pass validated Navigator enrichments for enhancement
+        #     loop = asyncio.get_event_loop()
+        #     final_enrichments = await loop.run_in_executor(
+        #         None,
+        #         self.researcher.enrich_partners_from_navigator,
+        #         valid_navigator_enrichments
+        #     )
+            
+        #     researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
+        #     complete_count = sum(1 for e in final_enrichments if e.status == "complete")
+        #     logger.info(
+        #         f"Researcher Agent complete - {complete_count}/{len(final_enrichments)} complete "
+        #         f"in {researcher_duration:.2f}s"
+        #     )
+            
+        #     # Step 4: Strategist Agent - Draft messages
+        #     logger.info(f"Step 4/4: Strategist Agent - Drafting messages for {len(final_enrichments)} partners")
+        #     strategist_start = datetime.utcnow()
+            
+        #     # Validate final enrichments before passing to Strategist Agent
+        #     if not final_enrichments:
+        #         logger.warning("Researcher Agent returned no final enrichments")
+        #         return []
+            
+        #     # Convert valid scraped data back to discoveries for Strategist Agent
+        #     discoveries = self._convert_scraped_data_to_discoveries(valid_scraped_data)
+            
+        #     # Ensure discoveries and enrichments lists are aligned
+        #     min_length = min(len(discoveries), len(final_enrichments))
+        #     if len(discoveries) != len(final_enrichments):
+        #         logger.warning(
+        #             f"Mismatched list lengths: {len(discoveries)} discoveries vs {len(final_enrichments)} enrichments. "
+        #             f"Processing first {min_length} items."
+        #         )
+            
+        #     # Process each partner through Strategist
+        #     for i in range(min_length):
+        #         discovery = discoveries[i]
+        #         enrichment = final_enrichments[i]
+        #         try:
+        #             # Validate individual partner data before processing
+        #             if not discovery.entity_name or not enrichment.verified_url:
+        #                 logger.warning(
+        #                     f"Skipping partner with incomplete data - "
+        #                     f"entity_name: {discovery.entity_name}, url: {enrichment.verified_url}"
+        #                 )
+        #                 continue
                     
-                    # Format into LeadObject
-                    lead_object = self._format_lead_object(
-                        discovery,
-                        enrichment,
-                        draft,
-                        market,
-                        city
-                    )
+        #             # Run Strategist in executor
+        #             draft = await loop.run_in_executor(
+        #                 None,
+        #                 self.strategist.draft_message,
+        #                 discovery,
+        #                 enrichment,
+        #                 market,
+        #                 city
+        #             )
                     
-                    lead_objects.append(lead_object)
+        #             # Validate draft before creating lead object
+        #             if not draft or not draft.draft_message:
+        #                 logger.warning(f"Strategist returned empty draft for {discovery.entity_name}")
+        #                 continue
                     
-                    logger.debug(
-                        f"Lead object created for {discovery.entity_name} - "
-                        f"status: {enrichment.status}"
-                    )
+        #             # Format into LeadObject
+        #             lead_object = self._format_lead_object(
+        #                 discovery,
+        #                 enrichment,
+        #                 draft,
+        #                 market,
+        #                 city
+        #             )
                     
-                except Exception as e:
-                    logger.error(
-                        f"Failed to process partner {discovery.entity_name} - "
-                        f"Error: {str(e)} - Skipping this partner",
-                        exc_info=True
-                    )
-                    continue
+        #             lead_objects.append(lead_object)
+                    
+        #             logger.debug(
+        #                 f"Lead object created for {discovery.entity_name} - "
+        #                 f"status: {enrichment.status}"
+        #             )
+                    
+        #         except Exception as e:
+        #             logger.error(
+        #                 f"Failed to process partner {discovery.entity_name} - "
+        #                 f"Error: {str(e)} - Skipping this partner",
+        #                 exc_info=True
+        #             )
+        #             continue
             
-            strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
-            logger.info(
-                f"Strategist Agent complete - generated {len(lead_objects)} drafts "
-                f"in {strategist_duration:.2f}s"
-            )
+        #     strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
+        #     logger.info(
+        #         f"Strategist Agent complete - generated {len(lead_objects)} drafts "
+        #         f"in {strategist_duration:.2f}s"
+        #     )
             
-            # Log pipeline summary
-            total_duration = (datetime.utcnow() - start_time).total_seconds()
-            logger.info(
-                f"Pipeline execution complete - "
-                f"city: {city}, market: {market}, "
-                f"total_duration: {total_duration:.2f}s, "
-                f"leads_generated: {len(lead_objects)}, "
-                f"scout: {scout_duration:.2f}s, "
-                f"navigator: {navigator_duration:.2f}s, "
-                f"researcher: {researcher_duration:.2f}s, "
-                f"strategist: {strategist_duration:.2f}s"
-            )
+        #     # Log pipeline summary
+        #     total_duration = (datetime.utcnow() - start_time).total_seconds()
+        #     logger.info(
+        #         f"Pipeline execution complete - "
+        #         f"city: {city}, market: {market}, "
+        #         f"total_duration: {total_duration:.2f}s, "
+        #         f"leads_generated: {len(lead_objects)}, "
+        #         f"scout: {scout_duration:.2f}s, "
+        #         f"navigator: {navigator_duration:.2f}s, "
+        #         f"researcher: {researcher_duration:.2f}s, "
+        #         f"strategist: {strategist_duration:.2f}s"
+        #     )
             
-            return lead_objects
+        #     return lead_objects
             
-        except asyncio.TimeoutError:
-            duration = (datetime.utcnow() - start_time).total_seconds()
-            logger.error(
-                f"Pipeline timeout exceeded - "
-                f"city: {city}, market: {market}, "
-                f"timeout: {self.pipeline_timeout}s, "
-                f"duration: {duration:.2f}s, "
-                f"partial_results: {len(lead_objects)} leads"
-            )
+        # except asyncio.TimeoutError:
+        #     duration = (datetime.utcnow() - start_time).total_seconds()
+        #     logger.error(
+        #         f"Pipeline timeout exceeded - "
+        #         f"city: {city}, market: {market}, "
+        #         f"timeout: {self.pipeline_timeout}s, "
+        #         f"duration: {duration:.2f}s, "
+        #         f"partial_results: {len(lead_objects)} leads"
+        #     )
             # Return partial results if any
             return lead_objects
             

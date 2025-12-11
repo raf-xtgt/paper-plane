@@ -397,6 +397,80 @@ class ResearcherAgent:
                 status="incomplete"
             )
     
+    def enrich_partners_from_navigator(self, navigator_enrichments: List[PartnerEnrichment]) -> List[PartnerEnrichment]:
+        """
+        Enhance Navigator Agent enrichments with additional research and fallback data.
+        
+        This method provides additional enrichment on top of Navigator Agent's contact extraction,
+        focusing on filling gaps and providing fallback data when Navigator extraction is incomplete.
+        
+        Args:
+            navigator_enrichments: List of PartnerEnrichment objects from Navigator Agent
+            
+        Returns:
+            List of enhanced PartnerEnrichment objects
+        """
+        logger.info(f"Starting additional enrichment for {len(navigator_enrichments)} partners from Navigator Agent")
+        
+        enhanced_partners = []
+        
+        for enrichment in navigator_enrichments:
+            try:
+                # If Navigator Agent already found complete information, use it as-is
+                if enrichment.status == "complete":
+                    logger.debug(f"Navigator provided complete data for {enrichment.verified_url}, using as-is")
+                    enhanced_partners.append(enrichment)
+                    continue
+                
+                # For incomplete Navigator results, try to fill gaps with traditional scraping
+                logger.info(f"Navigator result incomplete for {enrichment.verified_url}, attempting additional enrichment")
+                
+                # Create a temporary PartnerDiscovery object for legacy enrichment method
+                temp_partner = PartnerDiscovery(
+                    entity_name="Unknown",  # We don't have entity name from Navigator enrichment
+                    website_url=enrichment.verified_url,
+                    type="Unknown"
+                )
+                
+                # Use existing enrichment method as fallback
+                fallback_enrichment = self.enrich_partner(temp_partner)
+                
+                # Merge Navigator data with fallback data, prioritizing Navigator results
+                merged_enrichment = PartnerEnrichment(
+                    decision_maker=enrichment.decision_maker or fallback_enrichment.decision_maker,
+                    contact_info=enrichment.contact_info or fallback_enrichment.contact_info,
+                    contact_channel=enrichment.contact_channel or fallback_enrichment.contact_channel,
+                    key_fact=enrichment.key_fact or fallback_enrichment.key_fact,
+                    verified_url=enrichment.verified_url,
+                    status="complete" if (
+                        (enrichment.decision_maker or fallback_enrichment.decision_maker) and
+                        (enrichment.contact_info or fallback_enrichment.contact_info)
+                    ) else "incomplete"
+                )
+                
+                enhanced_partners.append(merged_enrichment)
+                
+                logger.debug(
+                    f"Enhanced enrichment for {enrichment.verified_url} - "
+                    f"Status: {merged_enrichment.status}"
+                )
+                
+            except Exception as e:
+                logger.error(
+                    f"Failed to enhance Navigator enrichment for {enrichment.verified_url}: {e}",
+                    exc_info=True
+                )
+                # Return original Navigator enrichment on error
+                enhanced_partners.append(enrichment)
+        
+        successful_count = sum(1 for e in enhanced_partners if e.status == "complete")
+        logger.info(
+            f"Researcher enhancement complete: {len(enhanced_partners)} total, "
+            f"{successful_count} complete, {len(enhanced_partners) - successful_count} incomplete"
+        )
+        
+        return enhanced_partners
+    
     def enrich_partners(self, partners: List[PartnerDiscovery]) -> List[PartnerEnrichment]:
         """
         Enrich multiple partners with contact details and key facts.
