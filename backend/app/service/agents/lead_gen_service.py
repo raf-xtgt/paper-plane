@@ -195,15 +195,16 @@ class LeadGenPipeline:
                 )
                 return []
 
-            print("scraped_data")
-            print(scraped_data)
             
             # Step 2: Navigator Agent - Extract contact information from websites
             logger.info(f"Step 2/4: Navigator Agent - Extracting contact info from {len(scraped_data)} partner websites")
             navigator_start = datetime.utcnow()
             
             # Validate scraped data before passing to Navigator Agent
-            valid_scraped_data = [data for data in scraped_data if data.website_url]
+            valid_scraped_data = [
+                data for data in scraped_data 
+                if data.website_url and ("http" in str(data.website_url) or "https" in str(data.website_url))
+            ]
             if len(valid_scraped_data) != len(scraped_data):
                 logger.warning(
                     f"Filtered out {len(scraped_data) - len(valid_scraped_data)} partners without valid website URLs"
@@ -213,6 +214,9 @@ class LeadGenPipeline:
                 logger.warning("No partners with valid website URLs found after validation")
                 return []
             
+            print("valid_scraped_data")
+            print(valid_scraped_data)
+
             # Run Navigator Agent (async) - use validated scraped_data from Scout
             navigator_enrichments = await self.navigator.navigate_and_extract_batch(valid_scraped_data)
             
