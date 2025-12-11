@@ -12,8 +12,8 @@ import asyncio
 from typing import List, Optional, Dict, Any
 import google.generativeai as genai
 from app.model.lead_gen_model import ScrapedBusinessData, PartnerEnrichment
-from app.service.agents.navigator_web_crawler import NavigatorWebCrawler
-from app.service.agents.navigator_content_extractor import NavigatorContentExtractor
+from app.service.agents.navigator.navigator_web_crawler import NavigatorWebCrawler
+from app.service.agents.navigator.navigator_content_extractor import NavigatorContentExtractor
 import re
 from pydantic import ValidationError
 
@@ -34,14 +34,15 @@ class NavigatorAgent:
     
     def __init__(self):
         """Initialize Navigator Agent with Crawl4AI and Gemini Flash model."""
+        # Configuration from environment variables
         self.model_name = os.getenv("ADK_MODEL_FLASH", "gemini-2.0-flash-exp")
         self.temperature = float(os.getenv("NAVIGATOR_TEMPERATURE", "0.1"))
         self.timeout = int(os.getenv("NAVIGATOR_TIMEOUT", "180"))
-        self.page_timeout = int(os.getenv("NAVIGATOR_PAGE_TIMEOUT", "60"))
+        self.page_timeout = int(os.getenv("NAVIGATOR_PAGE_TIMEOUT", "90"))
         self.max_retries = int(os.getenv("NAVIGATOR_MAX_RETRIES", "3"))
         self.concurrent_limit = int(os.getenv("NAVIGATOR_CONCURRENT_LIMIT", "5"))
         
-        # Initialize Gemini model
+        # Initialize Gemini model with proper configuration
         self.model = genai.GenerativeModel(
             model_name=self.model_name,
             generation_config={
@@ -49,6 +50,7 @@ class NavigatorAgent:
                 "top_p": 0.95,
                 "top_k": 40,
                 "max_output_tokens": 1024,
+                "response_mime_type": "application/json"
             }
         )
         
@@ -58,7 +60,7 @@ class NavigatorAgent:
             max_retries=self.max_retries
         )
         self.content_extractor = NavigatorContentExtractor(self.model)
-        self.data_validator = NavigatorDataValidator()
+        self.data_validator = DataValidator()
         
         logger.info(f"Navigator Agent initialized with model: {self.model_name}")
     
@@ -75,44 +77,67 @@ class NavigatorAgent:
         Returns:
             List of PartnerEnrichment objects
         """
-        logger.info(f"Starting batch processing of {len(scraped_data)} partners")
+        if not scraped_data:
+            logger.warning("No scraped data provided for batch processing")
+            return []
+        
+        # Filter data with valid website URLs
+        valid_data = [data for data in scraped_data if data.website_url]
+        logger.info(f"Starting batch processing of {len(valid_data)} partners with valid URLs")
+        
+        if not valid_data:
+            logger.warning("No partners with valid website URLs found")
+            return []
         
         # Create semaphore to limit concurrent processing
         semaphore = asyncio.Semaphore(self.concurrent_limit)
         
-        async def process_with_semaphore(data: ScrapedBusinessData) -> PartnerEnrichment:
+        async def process_with_semaphore(data: ScrapedBusinessData, index: int) -> PartnerEnrichment:
+            """Process single partner with semaphore control."""
             async with semaphore:
-                return await self.navigate_and_extract(
-                    website_url=data.website_url,
-                    entity_name=data.org_name or "Unknown"
-                )
+                try:
+                    return await self.navigate_and_extract(
+                        website_url=data.website_url,
+                        entity_name=data.org_name or f"Partner_{index}"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to process partner {index} ({data.org_name}): {e}")
+                    # Return incomplete enrichment for failed processing
+                    return PartnerEnrichment(
+                        verified_url=data.website_url,
+                        status="incomplete"
+                    )
         
         # Process all partners concurrently with limit
         tasks = [
-            process_with_semaphore(data) 
-            for data in scraped_data 
-            if data.website_url
+            process_with_semaphore(data, i) 
+            for i, data in enumerate(valid_data)
         ]
         
+        # Execute all tasks and collect results
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Filter out exceptions and log errors
+        # Process results and handle any remaining exceptions
         enrichments = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                logger.error(f"Failed to process partner {i}: {result}")
-                # Create incomplete enrichment for failed processing
+                logger.error(f"Unexpected exception for partner {i}: {result}")
+                # Create fallback incomplete enrichment
                 try:
                     enrichments.append(PartnerEnrichment(
-                        verified_url=scraped_data[i].website_url,
+                        verified_url=valid_data[i].website_url,
                         status="incomplete"
                     ))
-                except Exception as e:
-                    logger.error(f"Failed to create incomplete enrichment: {e}")
+                except Exception as fallback_error:
+                    logger.error(f"Failed to create fallback enrichment: {fallback_error}")
             else:
                 enrichments.append(result)
         
-        logger.info(f"Completed batch processing: {len(enrichments)} results")
+        successful_count = sum(1 for e in enrichments if e.status == "complete")
+        logger.info(
+            f"Completed batch processing: {len(enrichments)} total, "
+            f"{successful_count} successful, {len(enrichments) - successful_count} incomplete"
+        )
         return enrichments
     
     async def navigate_and_extract(
@@ -134,28 +159,30 @@ class NavigatorAgent:
         logger.info(f"Processing {entity_name} at {website_url}")
         
         try:
-            # Step 1: Crawl website and get content
-            markdown_content, verified_url = await self.web_crawler.crawl_website(
-                website_url, entity_name
-            )
-            
-            # Step 2: Extract contact information using LLM
-            extracted_data = await self.content_extractor.extract_contact_info(
-                markdown_content, entity_name, verified_url
-            )
-            
-            # Step 3: Validate and create PartnerEnrichment
-            enrichment = self.data_validator.validate_partner_enrichment(
-                extracted_data, verified_url
-            )
-            
-            duration = asyncio.get_event_loop().time() - start_time
-            logger.info(
-                f"Successfully processed {entity_name} in {duration:.2f}s - "
-                f"Status: {enrichment.status}"
-            )
-            
-            return enrichment
+            # Apply timeout to the entire processing operation
+            async with asyncio.timeout(self.timeout):
+                # Step 1: Crawl website and get content
+                markdown_content, verified_url = await self.web_crawler.crawl_website(
+                    website_url, entity_name
+                )
+                
+                # Step 2: Extract contact information using LLM
+                extracted_data = await self.content_extractor.extract_contact_info(
+                    markdown_content, entity_name, verified_url
+                )
+                
+                # Step 3: Validate and create PartnerEnrichment
+                enrichment = self.data_validator.validate_partner_enrichment(
+                    extracted_data, verified_url
+                )
+                
+                duration = asyncio.get_event_loop().time() - start_time
+                logger.info(
+                    f"Successfully processed {entity_name} in {duration:.2f}s - "
+                    f"Status: {enrichment.status}"
+                )
+                
+                return enrichment
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout processing {entity_name} after {self.timeout}s")
@@ -171,7 +198,7 @@ class NavigatorAgent:
             )
 
 
-class NavigatorDataValidator:
+class DataValidator:
     """
     Validation and normalization of extracted data.
     """
@@ -181,7 +208,7 @@ class NavigatorDataValidator:
         self.email_pattern = re.compile(
             r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         )
-        logger.debug("NavigatorDataValidator initialized")
+        logger.debug("DataValidator initialized")
     
     def validate_email(self, email: str) -> bool:
         """Validate email format using regex."""
