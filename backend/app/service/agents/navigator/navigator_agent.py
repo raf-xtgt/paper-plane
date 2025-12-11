@@ -201,89 +201,368 @@ class NavigatorAgent:
 class DataValidator:
     """
     Validation and normalization of extracted data.
+    
+    Implements Requirements 7.1, 7.2, 7.3, 7.4, 7.5:
+    - Email format validation using regex patterns
+    - Phone number normalization for consistent formatting
+    - Contact channel classification and determination
+    - PartnerEnrichment validation with Pydantic model validation
+    - Status determination logic (complete vs incomplete)
+    - Data normalization and cleanup for extracted information
     """
     
     def __init__(self):
-        """Initialize DataValidator."""
+        """Initialize DataValidator with validation patterns and configurations."""
+        # Email validation pattern (Requirement 7.1)
         self.email_pattern = re.compile(
             r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         )
-        logger.debug("DataValidator initialized")
+        
+        # Phone number patterns for validation
+        self.phone_patterns = [
+            re.compile(r'^\+?[1-9]\d{1,14}$'),  # International format
+            re.compile(r'^\d{10}$'),  # US 10-digit format
+            re.compile(r'^\d{3}-\d{3}-\d{4}$'),  # US format with dashes
+            re.compile(r'^\(\d{3}\)\s?\d{3}-\d{4}$'),  # US format with parentheses
+        ]
+        
+        # Valid contact channels for validation
+        self.valid_contact_channels = [
+            "WhatsApp", "Email", "Messenger", "Instagram", "PhoneNo", "Other"
+        ]
+        
+        # Generic email prefixes to avoid (prefer personal emails)
+        self.generic_email_prefixes = [
+            "info", "contact", "admin", "support", "noreply", "no-reply",
+            "webmaster", "hello", "mail", "sales", "service", "help"
+        ]
+        
+        logger.debug("DataValidator initialized with validation patterns")
     
     def validate_email(self, email: str) -> bool:
-        """Validate email format using regex."""
-        if not email:
+        """
+        Validate email format using regex patterns.
+        
+        Implements Requirement 7.1: Email address validation using proper email format validation.
+        
+        Args:
+            email: Email address to validate
+            
+        Returns:
+            True if email format is valid, False otherwise
+        """
+        if not email or not isinstance(email, str):
             return False
-        return bool(self.email_pattern.match(email.strip()))
+        
+        email = email.strip().lower()
+        
+        # Check basic format
+        if not self.email_pattern.match(email):
+            return False
+        
+        # Additional validation checks
+        if email.count('@') != 1:
+            return False
+        
+        local_part, domain_part = email.split('@')
+        
+        # Validate local part
+        if not local_part or len(local_part) > 64:
+            return False
+        
+        # Validate domain part
+        if not domain_part or len(domain_part) > 255:
+            return False
+        
+        # Check for valid domain structure
+        if not re.match(r'^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', domain_part):
+            return False
+        
+        return True
     
     def normalize_phone(self, phone: str) -> str:
-        """Normalize phone number format."""
-        if not phone:
+        """
+        Normalize phone number format for consistent formatting.
+        
+        Implements Requirement 7.2: Phone number normalization to consistent format.
+        
+        Args:
+            phone: Phone number to normalize
+            
+        Returns:
+            Normalized phone number string
+        """
+        if not phone or not isinstance(phone, str):
             return phone
         
         # Remove all non-digit characters except +
-        normalized = re.sub(r'[^\d+]', '', phone)
-        return normalized
+        normalized = re.sub(r'[^\d+]', '', phone.strip())
+        
+        # Handle different phone number formats
+        if normalized.startswith('+'):
+            # International format - keep as is if valid
+            if len(normalized) >= 8 and len(normalized) <= 16:
+                return normalized
+        elif len(normalized) == 10:
+            # US 10-digit format - add +1 prefix
+            return f"+1{normalized}"
+        elif len(normalized) == 11 and normalized.startswith('1'):
+            # US 11-digit format starting with 1 - add + prefix
+            return f"+{normalized}"
+        elif len(normalized) >= 7:
+            # Other formats - keep as is if reasonable length
+            return normalized
+        
+        # Return original if normalization doesn't produce valid result
+        return phone
     
     def determine_contact_channel(self, contact_info: str) -> str:
-        """Classify contact information into appropriate channel."""
-        if not contact_info:
+        """
+        Classify contact information into appropriate channel type.
+        
+        Implements Requirement 7.5: Contact channel classification for contact type classification.
+        
+        Args:
+            contact_info: Contact information string to classify
+            
+        Returns:
+            Contact channel type: WhatsApp|Email|Messenger|Instagram|PhoneNo|Other
+        """
+        if not contact_info or not isinstance(contact_info, str):
             return "Other"
         
-        contact_lower = contact_info.lower()
+        contact_lower = contact_info.lower().strip()
         
+        # Email detection (highest priority for @ symbol)
         if '@' in contact_info and self.validate_email(contact_info):
             return "Email"
-        elif any(keyword in contact_lower for keyword in ['whatsapp', 'wa.me', 'wa.link']):
+        
+        # WhatsApp detection
+        whatsapp_indicators = [
+            'whatsapp', 'wa.me', 'wa.link', 'whatsapp:', 'whatsapp number',
+            'whatsapp contact', 'wa:', 'whatsapp chat'
+        ]
+        if any(indicator in contact_lower for indicator in whatsapp_indicators):
             return "WhatsApp"
-        elif any(keyword in contact_lower for keyword in ['instagram', 'insta', 'ig']):
-            return "Instagram"
-        elif any(keyword in contact_lower for keyword in ['messenger', 'fb', 'facebook']):
+        
+        # Instagram detection
+        instagram_indicators = [
+            'instagram', 'insta', '@', 'ig:', 'instagram.com',
+            'instagram handle', 'instagram account'
+        ]
+        if any(indicator in contact_lower for indicator in instagram_indicators):
+            # Additional check to avoid false positives with email addresses
+            if '@' not in contact_info or 'instagram' in contact_lower:
+                return "Instagram"
+        
+        # Messenger detection
+        messenger_indicators = [
+            'messenger', 'fb', 'facebook', 'm.me', 'facebook messenger',
+            'fb messenger', 'facebook.com'
+        ]
+        if any(indicator in contact_lower for indicator in messenger_indicators):
             return "Messenger"
-        elif re.search(r'[\d+\-\(\)\s]{7,}', contact_info):
-            return "PhoneNo"
-        else:
-            return "Other"
+        
+        # Phone number detection (check for digit patterns)
+        if re.search(r'[\d+\-\(\)\s]{7,}', contact_info):
+            # Additional validation to ensure it's actually a phone number
+            digits_only = re.sub(r'[^\d]', '', contact_info)
+            if len(digits_only) >= 7:
+                return "PhoneNo"
+        
+        # Default to Other if no specific pattern matches
+        return "Other"
     
     def validate_partner_enrichment(
         self, 
         data: Dict[str, Any], 
         verified_url: str
     ) -> PartnerEnrichment:
-        """Create and validate PartnerEnrichment object."""
+        """
+        Create and validate PartnerEnrichment object with comprehensive validation.
+        
+        Implements Requirements 7.3, 7.4, 7.5:
+        - Pydantic model validation for PartnerEnrichment
+        - Status determination logic (complete vs incomplete)
+        - Data normalization and cleanup for extracted information
+        
+        Args:
+            data: Dictionary with extracted contact information
+            verified_url: Verified website URL
+            
+        Returns:
+            Validated PartnerEnrichment object
+        """
         try:
-            # Normalize contact info if present
-            contact_info = data.get("contact_info")
-            if contact_info and data.get("contact_channel") == "PhoneNo":
-                contact_info = self.normalize_phone(contact_info)
+            # Extract and validate individual fields
+            decision_maker = self._validate_and_clean_decision_maker(data.get("decision_maker"))
+            contact_info = self._validate_and_clean_contact_info(data.get("contact_info"))
+            key_fact = self._validate_and_clean_key_fact(data.get("key_fact"))
             
-            # Determine contact channel if not provided or validate existing
-            contact_channel = data.get("contact_channel")
-            if contact_info and not contact_channel:
-                contact_channel = self.determine_contact_channel(contact_info)
+            # Normalize contact info if it's a phone number
+            if contact_info:
+                # Determine contact channel first
+                contact_channel = data.get("contact_channel")
+                if not contact_channel or contact_channel not in self.valid_contact_channels:
+                    contact_channel = self.determine_contact_channel(contact_info)
+                
+                # Normalize phone numbers
+                if contact_channel == "PhoneNo":
+                    contact_info = self.normalize_phone(contact_info)
+                
+                # Validate email addresses
+                elif contact_channel == "Email":
+                    if not self.validate_email(contact_info):
+                        logger.warning(f"Invalid email format detected: {contact_info}")
+                        contact_info = None
+                        contact_channel = None
+            else:
+                contact_channel = None
             
-            # Create PartnerEnrichment object
+            # Determine completion status (Requirement 7.3, 7.4)
+            status = self._determine_completion_status(decision_maker, contact_info)
+            
+            # Create PartnerEnrichment object with Pydantic validation
             enrichment = PartnerEnrichment(
-                decision_maker=data.get("decision_maker"),
+                decision_maker=decision_maker,
                 contact_info=contact_info,
                 contact_channel=contact_channel,
-                key_fact=data.get("key_fact"),
+                key_fact=key_fact,
                 verified_url=verified_url,
-                status=data.get("status", "incomplete")
+                status=status
             )
             
+            logger.debug(f"PartnerEnrichment validation successful - Status: {status}")
             return enrichment
             
         except ValidationError as e:
-            logger.error(f"Validation error creating PartnerEnrichment: {e}")
-            # Return minimal valid object
+            logger.error(f"Pydantic validation error creating PartnerEnrichment: {e}")
+            # Return minimal valid object with incomplete status
             return PartnerEnrichment(
                 verified_url=verified_url,
                 status="incomplete"
             )
         except Exception as e:
-            logger.error(f"Error creating PartnerEnrichment: {e}")
+            logger.error(f"Unexpected error creating PartnerEnrichment: {e}")
             return PartnerEnrichment(
                 verified_url=verified_url,
                 status="incomplete"
             )
+    
+    def _validate_and_clean_decision_maker(self, decision_maker: Any) -> Optional[str]:
+        """
+        Validate and clean decision maker information.
+        
+        Args:
+            decision_maker: Raw decision maker data
+            
+        Returns:
+            Cleaned decision maker string or None
+        """
+        if not decision_maker or not isinstance(decision_maker, str):
+            return None
+        
+        cleaned = decision_maker.strip()
+        
+        # Check for null-like values
+        null_values = ["null", "none", "n/a", "na", "not available", "not found", ""]
+        if cleaned.lower() in null_values:
+            return None
+        
+        # Ensure reasonable length (not too short or too long)
+        if len(cleaned) < 2 or len(cleaned) > 200:
+            return None
+        
+        # Basic format validation - should contain letters
+        if not re.search(r'[a-zA-Z]', cleaned):
+            return None
+        
+        return cleaned
+    
+    def _validate_and_clean_contact_info(self, contact_info: Any) -> Optional[str]:
+        """
+        Validate and clean contact information.
+        
+        Args:
+            contact_info: Raw contact information data
+            
+        Returns:
+            Cleaned contact info string or None
+        """
+        if not contact_info or not isinstance(contact_info, str):
+            return None
+        
+        cleaned = contact_info.strip()
+        
+        # Check for null-like values
+        null_values = ["null", "none", "n/a", "na", "not available", "not found", ""]
+        if cleaned.lower() in null_values:
+            return None
+        
+        # Ensure reasonable length
+        if len(cleaned) < 3 or len(cleaned) > 100:
+            return None
+        
+        # Check if it's a generic email (prefer personal emails)
+        if '@' in cleaned:
+            local_part = cleaned.split('@')[0].lower()
+            if local_part in self.generic_email_prefixes:
+                logger.debug(f"Skipping generic email: {cleaned}")
+                return None
+        
+        return cleaned
+    
+    def _validate_and_clean_key_fact(self, key_fact: Any) -> Optional[str]:
+        """
+        Validate and clean key fact information.
+        
+        Args:
+            key_fact: Raw key fact data
+            
+        Returns:
+            Cleaned key fact string or None
+        """
+        if not key_fact or not isinstance(key_fact, str):
+            return None
+        
+        cleaned = key_fact.strip()
+        
+        # Check for null-like values
+        null_values = ["null", "none", "n/a", "na", "not available", "not found", ""]
+        if cleaned.lower() in null_values:
+            return None
+        
+        # Ensure reasonable length (key facts should be meaningful)
+        if len(cleaned) < 10 or len(cleaned) > 500:
+            return None
+        
+        # Should contain some meaningful content (letters and possibly numbers)
+        if not re.search(r'[a-zA-Z]', cleaned):
+            return None
+        
+        return cleaned
+    
+    def _determine_completion_status(
+        self, 
+        decision_maker: Optional[str], 
+        contact_info: Optional[str]
+    ) -> str:
+        """
+        Determine completion status based on available information.
+        
+        Implements Requirements 7.3, 7.4:
+        - "complete": Both decision_maker and contact_info successfully extracted
+        - "incomplete": Missing either decision_maker or contact_info (or both)
+        
+        Args:
+            decision_maker: Validated decision maker information
+            contact_info: Validated contact information
+            
+        Returns:
+            Status string: "complete" or "incomplete"
+        """
+        # Complete status requires both decision maker and contact info
+        if decision_maker and contact_info:
+            return "complete"
+        else:
+            return "incomplete"
