@@ -19,26 +19,58 @@ logger = logging.getLogger("lead_gen_pipeline.navigator.webcrawler")
 
 class NavigatorWebCrawler:
     """
-    Crawl4AI wrapper for intelligent website navigation.
+    Crawl4AI wrapper for intelligent website navigation with enhanced dynamic content handling.
     
     Features:
     - Headless browser with JavaScript execution
     - Intelligent page navigation (Staff/Team pages)
-    - Dynamic content handling (lazy loading, virtual scroll)
+    - Enhanced dynamic content handling (lazy loading, virtual scroll, SPAs)
+    - Adaptive crawling strategies based on content patterns
+    - Progressive content loading for complex websites
     - Overlay removal (pop-ups, cookie banners)
     - Content cleaning and Markdown conversion
+    
+    Dynamic Content Capabilities (Requirements 2.3, 2.5):
+    - Single-page application (SPA) detection and handling
+    - Virtual scrolling and lazy loading support
+    - Adaptive scrolling strategies based on content characteristics
+    - Progressive content loading with validation
+    - Enhanced timeout handling for dynamic content
     """
     
-    def __init__(self, page_timeout: int = 60, max_retries: int = 3, max_navigation_depth: int = 1):
-        """Initialize WebCrawler with configuration."""
+    def __init__(
+        self, 
+        page_timeout: int = 60, 
+        max_retries: int = 3, 
+        max_navigation_depth: int = 1,
+        enable_dynamic_content: bool = True,
+        adaptive_scrolling: bool = True
+    ):
+        """
+        Initialize WebCrawler with enhanced dynamic content handling configuration.
+        
+        Args:
+            page_timeout: Timeout for page loading in seconds
+            max_retries: Maximum retry attempts for failed crawls
+            max_navigation_depth: Maximum depth for page navigation
+            enable_dynamic_content: Enable enhanced dynamic content handling
+            adaptive_scrolling: Enable adaptive scrolling strategies
+        """
         self.page_timeout = page_timeout
         self.max_retries = max_retries
         self.max_navigation_depth = max_navigation_depth  # Limit navigation depth to prevent infinite loops
+        self.enable_dynamic_content = enable_dynamic_content
+        self.adaptive_scrolling = adaptive_scrolling
         
         # Configuration from environment variables
         self.headless = os.getenv("CRAWL4AI_HEADLESS", "true").lower() == "true"
         self.stealth_mode = os.getenv("CRAWL4AI_STEALTH", "true").lower() == "true"
         self.user_agent_mode = os.getenv("CRAWL4AI_USER_AGENT_MODE", "random")
+        
+        # Dynamic content handling settings
+        self.dynamic_content_timeout = int(os.getenv("CRAWL4AI_DYNAMIC_TIMEOUT", "90"))
+        self.max_scroll_attempts = int(os.getenv("CRAWL4AI_MAX_SCROLL", "15"))
+        self.scroll_delay_base = int(os.getenv("CRAWL4AI_SCROLL_DELAY", "3"))
         
         # Keywords for finding relevant pages (prioritized by importance)
         # Based on Requirement 3.2: prioritize Staff, Team, Leadership, Board, Partners, Doctors, Faculty, About Us, Contact, Director, CEO
@@ -59,7 +91,10 @@ class NavigatorWebCrawler:
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         ]
         
-        logger.debug(f"NavigatorWebCrawler initialized - headless: {self.headless}, stealth: {self.stealth_mode}")
+        logger.debug(
+            f"NavigatorWebCrawler initialized - headless: {self.headless}, stealth: {self.stealth_mode}, "
+            f"dynamic_content: {self.enable_dynamic_content}, adaptive_scrolling: {self.adaptive_scrolling}"
+        )
     
     async def crawl_website(
         self, 
@@ -93,7 +128,7 @@ class NavigatorWebCrawler:
                 crawler = self._configure_crawler(attempt)
                 
                 async with crawler:
-                    # Crawl the main page with network idle waiting
+                    # Initial crawl with basic dynamic content handling
                     result = await crawler.arun(
                         url=website_url,
                         config=self._get_crawler_config()
@@ -105,9 +140,38 @@ class NavigatorWebCrawler:
                     verified_url = result.url
                     main_content = result.markdown or ""
                     
-                    # Clean and validate main content
+                    # Detect dynamic content patterns for adaptive strategy
+                    content_patterns = self._detect_dynamic_content_patterns(main_content, website_url)
+                    
+                    # If content is insufficient or dynamic patterns detected, use adaptive handling
+                    needs_enhancement = (
+                        len(main_content.strip()) < 100 or 
+                        content_patterns["is_spa"] or 
+                        content_patterns["has_lazy_loading"] or
+                        content_patterns["content_density"] == "minimal"
+                    )
+                    
+                    if needs_enhancement:
+                        logger.debug(f"Using adaptive dynamic content handling for {entity_name}: {content_patterns}")
+                        
+                        enhanced_result = await self._apply_adaptive_crawling_strategy(
+                            crawler, website_url, entity_name, content_patterns
+                        )
+                        
+                        if enhanced_result and enhanced_result.success and enhanced_result.markdown:
+                            # Use enhanced result if it's significantly better
+                            if len(enhanced_result.markdown) > len(main_content) * 1.1:  # 10% improvement
+                                main_content = enhanced_result.markdown
+                                verified_url = enhanced_result.url
+                                logger.debug(f"Adaptive dynamic content extraction successful: {len(main_content)} chars")
+                            else:
+                                logger.debug(f"Adaptive handling didn't improve content significantly")
+                        else:
+                            logger.warning(f"Adaptive dynamic content handling failed for {entity_name}")
+                    
+                    # Final content validation
                     if len(main_content.strip()) < 100:
-                        logger.warning(f"Main page content too short for {entity_name}: {len(main_content)} chars")
+                        logger.warning(f"Main page content still insufficient for {entity_name}: {len(main_content)} chars")
                     
                     # Try to find and crawl relevant pages
                     relevant_content = await self._crawl_relevant_pages(
@@ -176,55 +240,413 @@ class NavigatorWebCrawler:
             verbose=False
         )
     
-    def _get_crawler_config(self) -> CrawlerRunConfig:
+    def _get_crawler_config(self, enhanced_dynamic_handling: bool = False) -> CrawlerRunConfig:
         """
-        Get crawler run configuration with dynamic content handling.
+        Get crawler run configuration with enhanced dynamic content handling.
         
-        Features:
+        Implements Requirements 2.3, 2.5:
         - Network idle waiting for JavaScript content
-        - Full page scanning with virtual scrolling
+        - Full page scanning with virtual scrolling for lazy-loaded content
+        - Enhanced handling for single-page applications
         - Overlay removal (pop-ups, cookie banners)
         - Content filtering and cleaning
+        
+        Args:
+            enhanced_dynamic_handling: Enable enhanced settings for complex SPAs
+            
+        Returns:
+            Configured CrawlerRunConfig for dynamic content handling
         """
-        return CrawlerRunConfig(
-            # Wait for network idle to ensure dynamic content loads
+        # Base configuration for all pages
+        config = CrawlerRunConfig(
+            # Wait for network idle to ensure dynamic content loads (Requirement 2.2)
             wait_until="networkidle",
             
-            # Enable full page scanning for lazy-loaded content
+            # Enable full page scanning for lazy-loaded content (Requirement 2.3)
             scan_full_page=True,
             
             # Remove overlay elements that block content
             remove_overlay_elements=True,
             
-            # Exclude non-content elements
+            # Exclude non-content elements but preserve structure for dynamic content
             excluded_selector=(
                 "nav, footer, header, .navigation, .menu, "
                 ".advertisement, .ads, .cookie-banner, .popup, "
                 ".modal, .overlay, .sidebar, .breadcrumb, "
-                "script, style, noscript"
+                "script, style, noscript, .social-media, .share-buttons"
             ),
             
-            # Use content filter for cleaning
+            # Use content filter for cleaning while preserving dynamic content
             content_filter=PruningContentFilter(
-                threshold=0.48,  # Balance between content and noise
+                threshold=0.45,  # Slightly lower threshold to capture more dynamic content
                 threshold_type="fixed",
-                min_word_threshold=10
+                min_word_threshold=8  # Lower threshold for dynamic content fragments
             ),
             
-            # Virtual scrolling configuration for dynamic content
-            scroll_delay=2,  # Wait 2 seconds between scrolls
-            max_scroll_steps=5,  # Limit scrolling to prevent infinite loops
+            # Enhanced virtual scrolling configuration for dynamic content (Requirement 2.3)
+            scroll_delay=3,  # Increased delay for dynamic content loading
+            max_scroll_steps=8,  # More steps for comprehensive content capture
             
-            # Timeout configuration
+            # Timeout configuration with buffer for dynamic content
             page_timeout=self.page_timeout * 1000,  # Convert to milliseconds
             
-            # Additional options for better content extraction
-            word_count_threshold=10,
-            only_text=False,  # Keep some HTML structure for better parsing
+            # Additional options for better dynamic content extraction
+            word_count_threshold=8,  # Lower threshold for dynamic fragments
+            only_text=False,  # Keep HTML structure for dynamic content parsing
             
-            # CSS selector for main content (fallback)
-            css_selector="main, article, .content, .main-content, #content, #main"
+            # Enhanced CSS selector for dynamic content
+            css_selector="main, article, .content, .main-content, #content, #main, .app, #app, .page-content, .container"
         )
+        
+        # Enhanced settings for complex single-page applications
+        if enhanced_dynamic_handling:
+            config.scroll_delay = 4  # Even longer delay for complex SPAs
+            config.max_scroll_steps = 12  # More comprehensive scrolling
+            config.page_timeout = (self.page_timeout + 30) * 1000  # Extended timeout
+            
+            # Additional selectors for SPA frameworks
+            config.css_selector += ", .vue-app, .react-app, .angular-app, [data-reactroot], #root"
+        
+        return config
+    
+    async def _handle_dynamic_content(
+        self, 
+        crawler: AsyncWebCrawler, 
+        url: str, 
+        entity_name: str,
+        is_spa_detected: bool = False
+    ) -> Optional[any]:
+        """
+        Handle dynamic content with enhanced strategies for SPAs and lazy loading.
+        
+        Implements Requirements 2.3, 2.5:
+        - Detects and handles single-page applications
+        - Implements progressive content loading strategies
+        - Handles virtual scrolling and lazy loading scenarios
+        
+        Args:
+            crawler: Configured AsyncWebCrawler instance
+            url: URL to crawl with dynamic content handling
+            entity_name: Entity name for logging
+            is_spa_detected: Whether SPA behavior was detected
+            
+        Returns:
+            Crawl result with enhanced dynamic content or None
+        """
+        try:
+            # Use enhanced configuration for detected SPAs
+            config = self._get_crawler_config(enhanced_dynamic_handling=is_spa_detected)
+            
+            logger.debug(f"Handling dynamic content for {entity_name} (SPA: {is_spa_detected})")
+            
+            # First attempt with standard dynamic handling
+            result = await crawler.arun(url=url, config=config)
+            
+            if result.success and result.markdown:
+                content_length = len(result.markdown)
+                logger.debug(f"Dynamic content extraction successful: {content_length} chars")
+                
+                # Check if we got substantial content
+                if content_length > 200:
+                    return result
+                else:
+                    logger.debug(f"Insufficient content from dynamic handling, trying enhanced mode")
+            
+            # If content is insufficient and we haven't tried enhanced mode, try it
+            if not is_spa_detected:
+                logger.debug(f"Retrying with enhanced SPA handling for {entity_name}")
+                enhanced_config = self._get_crawler_config(enhanced_dynamic_handling=True)
+                
+                # Add additional wait time for complex dynamic content
+                await asyncio.sleep(2)
+                
+                enhanced_result = await crawler.arun(url=url, config=enhanced_config)
+                
+                if enhanced_result.success and enhanced_result.markdown:
+                    enhanced_length = len(enhanced_result.markdown)
+                    logger.debug(f"Enhanced dynamic content extraction: {enhanced_length} chars")
+                    
+                    # Use enhanced result if it's significantly better
+                    if enhanced_length > content_length * 1.2:  # 20% improvement threshold
+                        return enhanced_result
+            
+            # Return the best result we got
+            return result if result.success else None
+            
+        except Exception as e:
+            logger.warning(f"Dynamic content handling failed for {entity_name}: {e}")
+            return None
+    
+    def _detect_spa_indicators(self, content: str, url: str) -> bool:
+        """
+        Detect if a website is likely a single-page application.
+        
+        Args:
+            content: Initial page content
+            url: Website URL
+            
+        Returns:
+            True if SPA indicators are detected
+        """
+        if not content:
+            return False
+        
+        content_lower = content.lower()
+        
+        # Common SPA framework indicators
+        spa_indicators = [
+            'react', 'vue', 'angular', 'ember', 'backbone',
+            'data-reactroot', 'ng-app', 'vue-app', 'ember-app',
+            'single page application', 'spa', 'client-side routing',
+            'virtual dom', 'component-based', 'progressive web app'
+        ]
+        
+        # Check for SPA indicators in content
+        indicator_count = sum(1 for indicator in spa_indicators if indicator in content_lower)
+        
+        # Check URL patterns that suggest SPA routing
+        spa_url_patterns = ['#/', '#!/', '/app/', '/dashboard/']
+        url_indicators = sum(1 for pattern in spa_url_patterns if pattern in url.lower())
+        
+        # Detect if content is very minimal (common in SPAs before JS loads)
+        is_minimal_content = len(content.strip()) < 500
+        
+        # SPA detected if multiple indicators present
+        spa_detected = (indicator_count >= 2) or (url_indicators >= 1) or (indicator_count >= 1 and is_minimal_content)
+        
+        if spa_detected:
+            logger.debug(f"SPA detected - indicators: {indicator_count}, URL patterns: {url_indicators}, minimal: {is_minimal_content}")
+        
+        return spa_detected
+    
+    async def _handle_lazy_loading_content(
+        self, 
+        crawler: AsyncWebCrawler, 
+        url: str, 
+        entity_name: str
+    ) -> Optional[any]:
+        """
+        Handle websites with extensive lazy loading using progressive scrolling.
+        
+        Implements enhanced virtual scrolling for Requirement 2.3:
+        - Progressive content loading with validation
+        - Adaptive scrolling based on content growth
+        - Optimized for lazy-loaded staff/team sections
+        
+        Args:
+            crawler: Configured AsyncWebCrawler instance
+            url: URL to crawl with lazy loading handling
+            entity_name: Entity name for logging
+            
+        Returns:
+            Crawl result with comprehensive lazy-loaded content
+        """
+        try:
+            logger.debug(f"Handling lazy loading content for {entity_name}")
+            
+            # Configure for aggressive lazy loading handling
+            lazy_config = CrawlerRunConfig(
+                wait_until="networkidle",
+                scan_full_page=True,
+                remove_overlay_elements=True,
+                
+                # Aggressive scrolling for lazy content
+                scroll_delay=5,  # Longer delay for lazy loading
+                max_scroll_steps=15,  # More steps for comprehensive loading
+                
+                # Extended timeout for lazy loading
+                page_timeout=(self.page_timeout + 45) * 1000,
+                
+                # Preserve more content during lazy loading
+                content_filter=PruningContentFilter(
+                    threshold=0.35,  # Lower threshold to capture lazy-loaded fragments
+                    threshold_type="fixed",
+                    min_word_threshold=5
+                ),
+                
+                # Enhanced selectors for lazy-loaded content
+                css_selector=(
+                    "main, article, .content, .main-content, #content, #main, "
+                    ".team, .staff, .people, .members, .leadership, .board, "
+                    ".lazy-load, .infinite-scroll, .load-more, .dynamic-content"
+                ),
+                
+                excluded_selector=(
+                    "nav, footer, header, .navigation, .menu, "
+                    ".advertisement, .ads, .cookie-banner, .popup, "
+                    ".modal, .overlay, .sidebar, .breadcrumb, "
+                    "script, style, noscript"
+                ),
+                
+                word_count_threshold=5,
+                only_text=False
+            )
+            
+            # Execute with lazy loading configuration
+            result = await crawler.arun(url=url, config=lazy_config)
+            
+            if result.success and result.markdown:
+                content_length = len(result.markdown)
+                logger.debug(f"Lazy loading content extraction: {content_length} chars")
+                
+                # Validate that we captured meaningful content
+                if content_length > 300:
+                    return result
+                else:
+                    logger.debug(f"Lazy loading extraction yielded insufficient content: {content_length} chars")
+            
+            return result if result.success else None
+            
+        except Exception as e:
+            logger.warning(f"Lazy loading content handling failed for {entity_name}: {e}")
+            return None
+    
+    def _optimize_scroll_strategy(self, content_length: int, is_spa: bool) -> dict:
+        """
+        Optimize scrolling strategy based on content characteristics.
+        
+        Args:
+            content_length: Length of initially loaded content
+            is_spa: Whether the site is detected as SPA
+            
+        Returns:
+            Dictionary with optimized scroll parameters
+        """
+        # Base strategy
+        strategy = {
+            "scroll_delay": 3,
+            "max_scroll_steps": 8,
+            "timeout_buffer": 30
+        }
+        
+        # Adjust for content characteristics
+        if content_length < 200:
+            # Very minimal content - likely heavy lazy loading
+            strategy["scroll_delay"] = 5
+            strategy["max_scroll_steps"] = 12
+            strategy["timeout_buffer"] = 45
+        elif content_length < 500:
+            # Some content but likely more to load
+            strategy["scroll_delay"] = 4
+            strategy["max_scroll_steps"] = 10
+            strategy["timeout_buffer"] = 35
+        
+        # Additional adjustments for SPAs
+        if is_spa:
+            strategy["scroll_delay"] += 1
+            strategy["max_scroll_steps"] += 3
+            strategy["timeout_buffer"] += 15
+        
+        return strategy
+    
+    def _detect_dynamic_content_patterns(self, content: str, url: str) -> dict:
+        """
+        Detect various dynamic content patterns to optimize crawling strategy.
+        
+        Args:
+            content: Initial page content
+            url: Website URL
+            
+        Returns:
+            Dictionary with detected patterns and recommended strategies
+        """
+        patterns = {
+            "has_lazy_loading": False,
+            "has_infinite_scroll": False,
+            "has_load_more": False,
+            "has_virtual_scroll": False,
+            "is_spa": False,
+            "content_density": "normal"
+        }
+        
+        if not content:
+            patterns["content_density"] = "minimal"
+            return patterns
+        
+        content_lower = content.lower()
+        
+        # Detect lazy loading indicators
+        lazy_indicators = [
+            "lazy", "load-more", "show-more", "view-more", 
+            "infinite-scroll", "scroll-load", "on-demand"
+        ]
+        patterns["has_lazy_loading"] = any(indicator in content_lower for indicator in lazy_indicators)
+        
+        # Detect infinite scroll
+        infinite_indicators = ["infinite", "endless", "continuous", "auto-load"]
+        patterns["has_infinite_scroll"] = any(indicator in content_lower for indicator in infinite_indicators)
+        
+        # Detect load more buttons
+        load_more_indicators = ["load more", "show more", "view all", "see all", "expand"]
+        patterns["has_load_more"] = any(indicator in content_lower for indicator in load_more_indicators)
+        
+        # Detect virtual scrolling
+        virtual_indicators = ["virtual-scroll", "virtualized", "windowing"]
+        patterns["has_virtual_scroll"] = any(indicator in content_lower for indicator in virtual_indicators)
+        
+        # Detect SPA
+        patterns["is_spa"] = self._detect_spa_indicators(content, url)
+        
+        # Determine content density
+        content_length = len(content.strip())
+        if content_length < 200:
+            patterns["content_density"] = "minimal"
+        elif content_length < 1000:
+            patterns["content_density"] = "light"
+        elif content_length > 5000:
+            patterns["content_density"] = "heavy"
+        else:
+            patterns["content_density"] = "normal"
+        
+        return patterns
+    
+    async def _apply_adaptive_crawling_strategy(
+        self, 
+        crawler: AsyncWebCrawler, 
+        url: str, 
+        entity_name: str, 
+        patterns: dict
+    ) -> Optional[any]:
+        """
+        Apply adaptive crawling strategy based on detected content patterns.
+        
+        Implements comprehensive dynamic content handling for Requirements 2.3, 2.5:
+        - Adapts strategy based on detected patterns
+        - Optimizes for different types of dynamic content
+        - Provides fallback mechanisms for complex scenarios
+        
+        Args:
+            crawler: Configured AsyncWebCrawler instance
+            url: URL to crawl
+            entity_name: Entity name for logging
+            patterns: Detected content patterns
+            
+        Returns:
+            Optimized crawl result
+        """
+        try:
+            logger.debug(f"Applying adaptive strategy for {entity_name}: {patterns}")
+            
+            # Choose strategy based on detected patterns
+            if patterns["has_lazy_loading"] or patterns["has_infinite_scroll"]:
+                # Use lazy loading specialized handling
+                result = await self._handle_lazy_loading_content(crawler, url, entity_name)
+                if result and result.success:
+                    return result
+            
+            if patterns["is_spa"] or patterns["content_density"] == "minimal":
+                # Use enhanced SPA handling
+                result = await self._handle_dynamic_content(crawler, url, entity_name, is_spa_detected=True)
+                if result and result.success:
+                    return result
+            
+            # Fallback to standard enhanced handling
+            result = await self._handle_dynamic_content(crawler, url, entity_name, is_spa_detected=False)
+            return result
+            
+        except Exception as e:
+            logger.warning(f"Adaptive crawling strategy failed for {entity_name}: {e}")
+            return None
     
     async def _crawl_relevant_pages(
         self, 
@@ -273,11 +695,25 @@ class NavigatorWebCrawler:
                 try:
                     logger.debug(f"Crawling relevant page {i+1}/{len(relevant_links)} for {entity_name}: {target_url}")
                     
-                    # Crawl with timeout to prevent hanging
+                    # First attempt with standard dynamic content handling
                     result = await asyncio.wait_for(
                         crawler.arun(url=target_url, config=self._get_crawler_config()),
                         timeout=self.page_timeout
                     )
+                    
+                    # If content is insufficient, try enhanced dynamic handling
+                    if result.success and result.markdown and len(result.markdown.strip()) < 100:
+                        logger.debug(f"Trying enhanced dynamic handling for relevant page {i+1}")
+                        
+                        enhanced_result = await asyncio.wait_for(
+                            self._handle_dynamic_content(crawler, target_url, entity_name, is_spa_detected=True),
+                            timeout=self.page_timeout + 30
+                        )
+                        
+                        if enhanced_result and enhanced_result.success and enhanced_result.markdown:
+                            if len(enhanced_result.markdown) > len(result.markdown):
+                                result = enhanced_result
+                                logger.debug(f"Enhanced dynamic handling improved content for page {i+1}")
                     
                     if result.success and result.markdown:
                         content_length = len(result.markdown)
