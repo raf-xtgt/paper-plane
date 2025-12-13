@@ -183,7 +183,7 @@ class NavigatorWebCrawlerV2:
             logger.error(f"Error scanning base page {url}: {e}")
             return None
     
-    def _find_navigation_pages(self, links: List[str]) -> List[str]:
+    def _find_navigation_pages(self, links: List[Dict[str, str]]) -> List[str]:
         """
         Find About/Contact/Team pages in navigation with header/footer prioritization.
         
@@ -194,7 +194,7 @@ class NavigatorWebCrawlerV2:
         4. Return prioritized list with header pages preferred over footer pages
         
         Args:
-            links: List of all links found on base page
+            links: List of all link dicts found on base page
             
         Returns:
             Prioritized list of navigation page URLs to crawl
@@ -221,17 +221,17 @@ class NavigatorWebCrawlerV2:
         # Track found pages by type to detect duplicates
         found_page_types = set()
         
-        for link in links:
+        for link_data in links:
+            link = link_data.get('href', '')
+            text = link_data.get('text', '')
+
             if link in processed_urls:
                 continue
             processed_urls.add(link)
-            
-            # Skip external links and non-web protocols
-            if self._should_skip_link(link):
-                continue
-            
+
             # Check if link matches target navigation pages
             link_lower = link.lower()
+            text_lower = text.lower()
             matched_page_type = None
             matched_priority = 0
             
@@ -244,7 +244,8 @@ class NavigatorWebCrawlerV2:
                 if (target_clean in link_lower or 
                     target_dash in link_lower or 
                     target_underscore in link_lower or
-                    target_page.lower() in link_lower):
+                    target_page.lower() in link_lower or
+                    target_page.lower() in text_lower):
                     
                     matched_page_type = target_page.lower()
                     matched_priority = page_priorities.get(matched_page_type, 1)
@@ -577,39 +578,36 @@ class NavigatorWebCrawlerV2:
             word_count_threshold=5
         )
     
-    def _extract_links(self, result) -> List[str]:
+    def _extract_links(self, result) -> List[Dict[str, str]]:
         """
-        Extract all internal links from crawl result.
+        Extract all links from crawl result.
         
         Args:
             result: Crawl4AI result object
             
         Returns:
-            List of internal links found on the page
+            List of link dictionaries with href and text.
         """
         links = []
         
-        if not result or not hasattr(result, 'links') or not result.links:
-            logger.debug("No links found in crawl result")
+        if not result or not hasattr(result, 'links') or not result.links or not isinstance(result.links, dict):
+            logger.debug("No links found in crawl result or links is not a dictionary")
             return links
         
-        base_domain = urlparse(result.url).netloc
-        
-        for link_data in result.links:
+        all_links_data = result.links.get('internal', []) + result.links.get('external', [])
+
+        for link_data in all_links_data:
             if isinstance(link_data, dict) and 'href' in link_data:
-                href = link_data['href']
-            else:
-                href = str(link_data)
-            
-            # Convert relative URLs to absolute
-            if href.startswith('/'):
-                href = urljoin(result.url, href)
-            
-            # Only include internal links
-            if urlparse(href).netloc == base_domain or not urlparse(href).netloc:
-                links.append(href)
+                href = link_data.get('href', '')
+                text = link_data.get('text', '')
+                
+                # Convert relative URLs to absolute
+                if href.startswith('/'):
+                    href = urljoin(result.url, href)
+                
+                links.append({'href': href, 'text': text})
         
-        logger.debug(f"Extracted {len(links)} internal links")
+        logger.debug(f"Extracted {len(links)} links")
         return links
     
     def _should_skip_link(self, link: str) -> bool:
