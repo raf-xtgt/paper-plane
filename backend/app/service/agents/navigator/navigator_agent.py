@@ -11,10 +11,11 @@ import logging
 import asyncio
 from typing import List, Optional, Dict, Any
 import google.generativeai as genai
-from app.model.lead_gen_model import ScrapedBusinessData, PartnerEnrichment
+from app.model.lead_gen_model import ScrapedBusinessData, PartnerEnrichment, PartnerContactDetails
 from app.service.agents.navigator.navigator_web_crawler import NavigatorWebCrawler
+from app.service.agents.navigator.navigator_web_crawler_v2 import NavigatorWebCrawlerV2
 from app.service.agents.navigator.navigator_content_extractor import NavigatorContentExtractor
-from app.service.agents.navigator.navigator_llm_processor import PartnerContactDetails, LLMProcessor
+from app.service.agents.navigator.navigator_llm_processor import LLMProcessor
 import re
 from pydantic import ValidationError
 
@@ -60,7 +61,9 @@ class NavigatorAgent:
             page_timeout=self.page_timeout,
             max_retries=self.max_retries
         )
+        self.web_crawler_v2 = NavigatorWebCrawlerV2(page_timeout=self.page_timeout)
         self.content_extractor = NavigatorContentExtractor(self.model)
+        self.llm_processor = LLMProcessor(model_name=self.model_name)
         self.data_validator = DataValidator()
         
         logger.info(f"Navigator Agent initialized with model: {self.model_name}")
@@ -84,7 +87,7 @@ class NavigatorAgent:
         
         # Filter data with valid website URLs
         valid_data = [data for data in scraped_data if data.website_url]
-        logger.info(f"Starting batch processing of {len(valid_data)} partners with valid URLs")
+        logger.info(f"Starting V2 batch processing of {len(valid_data)} partners with valid URLs")
         
         if not valid_data:
             logger.warning("No partners with valid website URLs found")
@@ -106,7 +109,8 @@ class NavigatorAgent:
                     # Return incomplete enrichment for failed processing
                     return PartnerEnrichment(
                         verified_url=data.website_url,
-                        status="incomplete"
+                        status="incomplete",
+                        all_contacts=[]
                     )
         
         # Process all partners concurrently with limit
@@ -127,7 +131,8 @@ class NavigatorAgent:
                 try:
                     enrichments.append(PartnerEnrichment(
                         verified_url=valid_data[i].website_url,
-                        status="incomplete"
+                        status="incomplete",
+                        all_contacts=[]
                     ))
                 except Exception as fallback_error:
                     logger.error(f"Failed to create fallback enrichment: {fallback_error}")
@@ -135,9 +140,13 @@ class NavigatorAgent:
                 enrichments.append(result)
         
         successful_count = sum(1 for e in enrichments if e.status == "complete")
+        total_contacts = sum(len(e.all_contacts or []) for e in enrichments)
+        avg_contacts_per_partner = total_contacts / len(enrichments) if enrichments else 0
+        
         logger.info(
-            f"Completed batch processing: {len(enrichments)} total, "
-            f"{successful_count} successful, {len(enrichments) - successful_count} incomplete"
+            f"Completed V2 batch processing: {len(enrichments)} total, "
+            f"{successful_count} successful, {len(enrichments) - successful_count} incomplete, "
+            f"{total_contacts} total contacts extracted, {avg_contacts_per_partner:.1f} avg contacts per partner"
         )
         return enrichments
     
@@ -147,53 +156,134 @@ class NavigatorAgent:
         entity_name: str
     ) -> PartnerEnrichment:
         """
-        Process single partner with crawling and extraction.
+        Process single partner with V2 crawling and extraction.
+        
+        V2 Flow:
+        1. Use web_crawler_v2.crawl_and_extract_contacts() for systematic contact extraction
+        2. Process markdown with llm_processor.structure_contact_data() 
+        3. Create PartnerEnrichment with all_contacts field from structured data
         
         Args:
             website_url: Website URL to crawl
             entity_name: Name of the entity/organization
             
         Returns:
-            PartnerEnrichment object with extracted data
+            PartnerEnrichment object with V2 extracted data
         """
         start_time = asyncio.get_event_loop().time()
-        logger.info(f"Processing {entity_name} at {website_url}")
+        logger.info(f"V2 processing {entity_name} at {website_url}")
         
         try:
-            # Step 1: Crawl website and get content
-            markdown_content, verified_url = await self.web_crawler.crawl_website(
+            # Step 1: Use V2 crawler for systematic contact extraction
+            markdown_content = await self.web_crawler_v2.crawl_and_extract_contacts(
                 website_url, entity_name
             )
 
-            # Step 2: Extract contact information using LLM
-            extracted_data = await self.content_extractor.extract_contact_info(
-                markdown_content, entity_name, verified_url
+            # Step 2: Process markdown with LLM processor for structured data
+            structured_contacts = await self.llm_processor.structure_contact_data(
+                markdown_content, entity_name
             )
 
-            # Step 3: Validate and create PartnerEnrichment
-            enrichment = self.data_validator.validate_partner_enrichment(
-                extracted_data, verified_url
+            # Step 3: Create PartnerEnrichment with all_contacts field
+            enrichment = self._create_v2_partner_enrichment(
+                structured_contacts, website_url, entity_name
             )
 
             duration = asyncio.get_event_loop().time() - start_time
             logger.info(
-                f"Successfully processed {entity_name} in {duration:.2f}s - "
-                f"Status: {enrichment.status}"
+                f"V2 processing completed for {entity_name} in {duration:.2f}s - "
+                f"Status: {enrichment.status}, Contacts: {len(structured_contacts)}"
             )
 
             return enrichment
 
         except asyncio.TimeoutError:
-            logger.error(f"Timeout processing {entity_name} after {self.timeout}s")
+            logger.error(f"V2 timeout processing {entity_name} after {self.timeout}s")
             return PartnerEnrichment(
                 verified_url=website_url,
-                status="incomplete"
+                status="incomplete",
+                all_contacts=[]
             )
         except Exception as e:
-            logger.error(f"Error processing {entity_name}: {e}")
+            logger.error(f"V2 error processing {entity_name}: {e}")
             return PartnerEnrichment(
                 verified_url=website_url,
-                status="incomplete"
+                status="incomplete",
+                all_contacts=[]
+            )
+    
+    def _create_v2_partner_enrichment(
+        self, 
+        structured_contacts: List[Dict[str, Any]], 
+        website_url: str, 
+        entity_name: str
+    ) -> PartnerEnrichment:
+        """
+        Create PartnerEnrichment with V2 comprehensive contact data.
+        
+        Args:
+            structured_contacts: List of structured contact dictionaries
+            website_url: Website URL
+            entity_name: Entity name for logging
+            
+        Returns:
+            PartnerEnrichment with all_contacts field populated
+        """
+        try:
+            # Convert structured contacts to PartnerContactDetails objects
+            all_contacts = []
+            for contact_data in structured_contacts:
+                try:
+                    contact = PartnerContactDetails(**contact_data)
+                    all_contacts.append(contact)
+                except ValidationError as e:
+                    logger.warning(f"Invalid contact data for {entity_name}: {e}")
+                    continue
+            
+            # Determine primary contact for backward compatibility
+            primary_decision_maker = None
+            primary_contact_info = None
+            primary_contact_channel = None
+            
+            if all_contacts:
+                # Prioritize email contacts, then phone, then others
+                email_contacts = [c for c in all_contacts if c.contact_channel == "Email"]
+                phone_contacts = [c for c in all_contacts if c.contact_channel == "PhoneNo"]
+                
+                if email_contacts:
+                    primary = email_contacts[0]
+                elif phone_contacts:
+                    primary = phone_contacts[0]
+                else:
+                    primary = all_contacts[0]
+                
+                primary_decision_maker = primary.decision_maker
+                primary_contact_info = primary.contact_info
+                primary_contact_channel = primary.contact_channel
+            
+            # Determine status based on contact availability
+            status = "complete" if all_contacts else "incomplete"
+            
+            # Create PartnerEnrichment with V2 data
+            enrichment = PartnerEnrichment(
+                decision_maker=primary_decision_maker,
+                contact_info=primary_contact_info,
+                contact_channel=primary_contact_channel,
+                key_fact=None,  # V2 doesn't extract key facts
+                verified_url=website_url,
+                status=status,
+                all_contacts=all_contacts
+            )
+            
+            logger.debug(f"Created V2 PartnerEnrichment for {entity_name}: {len(all_contacts)} contacts, status: {status}")
+            return enrichment
+            
+        except Exception as e:
+            logger.error(f"Error creating V2 PartnerEnrichment for {entity_name}: {e}")
+            return PartnerEnrichment(
+                verified_url=website_url,
+                status="incomplete",
+                all_contacts=[]
             )
 
 

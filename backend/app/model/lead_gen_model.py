@@ -6,7 +6,7 @@ including API request/response models, agent output schemas, and Kafka message f
 """
 
 from pydantic import BaseModel, HttpUrl, Field
-from typing import Optional, Literal
+from typing import Optional, Literal, List
 from datetime import datetime
 
 
@@ -43,6 +43,22 @@ class LeadGenResponse(BaseModel):
 
 # Agent Output Models
 
+class PartnerContactDetails(BaseModel):
+    """
+    V2 contact schema for comprehensive contact extraction.
+    
+    Attributes:
+        decision_maker: Name tied to contact information
+        contact_info: Contact information (email, phone, social media URL)
+        contact_channel: Channel type (WhatsApp, Email, Messenger, Instagram, PhoneNo, Others)
+    """
+    decision_maker: Optional[str] = Field(None, description="Decision-maker name")
+    contact_info: Optional[str] = Field(None, description="Contact information")
+    contact_channel: Optional[Literal["WhatsApp", "Email", "Messenger", "Instagram", "PhoneNo", "Others"]] = Field(
+        None, description="Contact channel type"
+    )
+
+
 class PartnerDiscovery(BaseModel):
     """
     Output model for Scout Agent - discovered partner entities.
@@ -64,20 +80,24 @@ class PartnerEnrichment(BaseModel):
     Attributes:
         decision_maker: Name of the decision-maker (Principal, Director, etc.)
         contact_info: Direct contact information (email, phone, WhatsApp)
-        contact_channel: Preferred contact channel (WhatsApp, Email, Messenger, Instagram, PhoneNo)
+        contact_channel: Preferred contact channel (WhatsApp, Email, Messenger, Instagram, PhoneNo, Others)
         key_fact: One key fact for personalization (awards, branches, motto)
         verified_url: Verified website URL after scraping
         status: Enrichment status (complete or incomplete)
+        all_contacts: All extracted contact details (V2 comprehensive contact data)
     """
     decision_maker: Optional[str] = Field(None, description="Decision-maker name")
     contact_info: Optional[str] = Field(None, description="Contact information")
-    contact_channel: Optional[Literal["WhatsApp", "Email", "Messenger", "Instagram", "PhoneNo"]] = Field(
+    contact_channel: Optional[Literal["WhatsApp", "Email", "Messenger", "Instagram", "PhoneNo", "Others"]] = Field(
         None, description="Preferred contact channel"
     )
     key_fact: Optional[str] = Field(None, description="Key fact for personalization")
     verified_url: HttpUrl = Field(..., description="Verified website URL")
     status: Literal["complete", "incomplete"] = Field(
         ..., description="Enrichment completion status"
+    )
+    all_contacts: Optional[List[PartnerContactDetails]] = Field(
+        None, description="All extracted contact details"
     )
 
 
