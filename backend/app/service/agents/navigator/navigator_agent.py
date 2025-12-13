@@ -12,10 +12,9 @@ import asyncio
 from typing import List, Optional, Dict, Any
 import google.generativeai as genai
 from app.model.lead_gen_model import ScrapedBusinessData, PartnerEnrichment, PartnerContactDetails
-from app.service.agents.navigator.navigator_web_crawler import NavigatorWebCrawler
-from app.service.agents.navigator.navigator_web_crawler_v2 import NavigatorWebCrawlerV2
 from app.service.agents.navigator.navigator_content_extractor import NavigatorContentExtractor
 from app.service.agents.navigator.navigator_llm_processor import LLMProcessor
+from app.service.agents.navigator.navigator_crawler import NavigatorCrawler
 import re
 from pydantic import ValidationError
 
@@ -30,7 +29,7 @@ class NavigatorAgent:
     """
     Navigator Agent for intelligent web crawling and contact extraction.
     
-    Uses Crawl4AI with Playwright to render dynamic content and extract
+    Uses Playwright to render dynamic content and extract
     decision-maker contact information using Gemini Flash LLM.
     """
     
@@ -57,15 +56,10 @@ class NavigatorAgent:
         )
         
         # Initialize components
-        self.web_crawler = NavigatorWebCrawler(
-            page_timeout=self.page_timeout,
-            max_retries=self.max_retries
-        )
-        self.web_crawler_v2 = NavigatorWebCrawlerV2(page_timeout=self.page_timeout)
         self.content_extractor = NavigatorContentExtractor(self.model)
         self.llm_processor = LLMProcessor(model_name=self.model_name)
         self.data_validator = DataValidator()
-        
+        self.crawler = NavigatorCrawler()
         logger.info(f"Navigator Agent initialized with model: {self.model_name}")
     
     async def navigate_and_extract_batch(
@@ -174,15 +168,7 @@ class NavigatorAgent:
         logger.info(f"V2 processing {entity_name} at {website_url}")
         
         try:
-            # Step 1: Use V2 crawler for systematic contact extraction
-            markdown_content = await self.web_crawler_v2.crawl_and_extract_contacts(
-                website_url, entity_name
-            )
-
-            # Step 2: Process markdown with LLM processor for structured data
-            structured_contacts = await self.llm_processor.structure_contact_data(
-                markdown_content, entity_name
-            )
+            structured_contacts = await self.crawler.start(website_url)
 
             # Step 3: Create PartnerEnrichment with all_contacts field
             enrichment = self._create_v2_partner_enrichment(

@@ -139,6 +139,13 @@ class PartnerProfile(BaseModel):
     entity_type: str = Field(..., description="Entity type")
 
 
+
+class PartnerContact(BaseModel):
+    name: str
+    contact_info: str
+    class Config:
+        frozen = True
+
 class AIContext(BaseModel):
     """
     AI-generated context and insights for Kafka message.
