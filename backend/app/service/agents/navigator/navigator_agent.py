@@ -17,6 +17,7 @@ from app.service.agents.navigator.navigator_llm_processor import LLMProcessor
 from app.service.agents.navigator.navigator_crawler import NavigatorCrawler
 import re
 from pydantic import ValidationError
+from app.model.lead_gen_model import PartnerContact
 
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.navigator")
@@ -148,7 +149,7 @@ class NavigatorAgent:
         self, 
         website_url: str, 
         entity_name: str
-    ) -> PartnerEnrichment:
+    ) -> List[PartnerContact]:
         """
         Process single partner with V2 crawling and extraction.
         
@@ -169,34 +170,25 @@ class NavigatorAgent:
         
         try:
             structured_contacts = await self.crawler.start(website_url)
-
-            # Step 3: Create PartnerEnrichment with all_contacts field
-            enrichment = self._create_v2_partner_enrichment(
-                structured_contacts, website_url, entity_name
-            )
-
             duration = asyncio.get_event_loop().time() - start_time
             logger.info(
                 f"V2 processing completed for {entity_name} in {duration:.2f}s - "
-                f"Status: {enrichment.status}, Contacts: {len(structured_contacts)}"
+                f"Total Contacts: {len(structured_contacts)}"
             )
-
-            return enrichment
+            return structured_contacts
 
         except asyncio.TimeoutError:
             logger.error(f"V2 timeout processing {entity_name} after {self.timeout}s")
-            return PartnerEnrichment(
-                verified_url=website_url,
-                status="incomplete",
-                all_contacts=[]
-            )
+            return [PartnerContact(
+                name="NA",
+                contact_info="NA",
+            )]
         except Exception as e:
             logger.error(f"V2 error processing {entity_name}: {e}")
-            return PartnerEnrichment(
-                verified_url=website_url,
-                status="incomplete",
-                all_contacts=[]
-            )
+            return [PartnerContact(
+                name="NA",
+                contact_info="NA",
+            )]
     
     def _create_v2_partner_enrichment(
         self, 
