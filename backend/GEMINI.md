@@ -36,10 +36,11 @@ The core AI pipeline consists of four specialized agents working in sequence:
 - **Key Features**: Market-specific search queries, anti-detection measures, rate limiting
 
 ### 2. Navigator Agent  
-- **Purpose**: Decision-maker contact extraction from partner websites
+- **Purpose**: Systematic contact extraction from partner websites
 - **Technology**: Crawl4AI with Playwright for dynamic content rendering
-- **Output**: Structured contact information (decision-maker name, contact details, key facts)
-- **Key Features**: Intelligent page navigation, JavaScript content handling, LLM-based extraction
+- **V2 Approach**: Simplified systematic extraction without relevance filtering
+- **Output**: Comprehensive contact information (decision-maker names, emails, phone numbers, social media)
+- **Key Features**: Header/footer navigation prioritization, comprehensive contact extraction, name association, structured schema output
 
 ### 3. Researcher Agent
 - **Purpose**: Contact data enhancement and fallback enrichment
@@ -57,6 +58,7 @@ The core AI pipeline consists of four specialized agents working in sequence:
 
 1. **Student Recruitment Agencies**: Helping students find educational opportunities abroad
 2. **Medical Tourism Agencies**: Connecting patients with international healthcare providers
+
 
 # Project Structure
 
@@ -94,7 +96,8 @@ backend/app/
 │   │   │   └── sample_response/      # Sample data for testing
 │   │   ├── navigator/        # Navigator agent module
 │   │   │   ├── navigator_agent.py           # Web crawling and contact extraction
-│   │   │   ├── navigator_web_crawler.py     # Crawl4AI web crawling utilities
+│   │   │   ├── navigator_web_crawler.py     # V1 Crawl4AI web crawling utilities
+│   │   │   ├── navigator_web_crawler_v2.py  # V2 systematic contact extraction
 │   │   │   └── navigator_content_extractor.py # LLM-based content extraction
 │   │   ├── lead_gen_service.py    # Pipeline orchestrator
 │   │   ├── researcher_agent.py    # Contact enrichment and enhancement
@@ -106,7 +109,7 @@ backend/app/
 │   ├── api/                  # API request/response models
 │   │   ├── ppl_generated_lead.py
 │   │   └── ppl_lead_profile.py
-│   ├── lead_gen_model.py     # Lead generation data structures
+│   ├── lead_gen_model.py     # Lead generation data structures (includes PartnerContactDetails for V2)
 │   └── outbound_message_model.py
 └── util/                      # Shared utilities and configuration
     ├── agents/               # Agent configuration (ADK)
@@ -193,6 +196,21 @@ backend/app/
 - Navigator Agent uses async/await pattern for Crawl4AI web crawling
 - Researcher and Strategist agents run in executor to avoid blocking event loop
 
+## Data Models and Schema
+
+### Navigator Agent V2 Data Models
+- **PartnerContactDetails**: V2 contact schema with decision_maker, contact_info, contact_channel fields
+- **PartnerEnrichment**: Enhanced with all_contacts field as List[PartnerContactDetails] for comprehensive contact data
+- **Contact Channels**: Standardized enumeration (WhatsApp, Email, Messenger, Instagram, PhoneNo, Others)
+
+### V2 Schema Format
+```python
+PartnerContactDetails:
+  - decision_maker: str  # Name tied to contact information
+  - contact_info: str    # Contact information (email, phone, social media URL)
+  - contact_channel: str # Channel type (WhatsApp, Email, Messenger, Instagram, PhoneNo, Others)
+```
+
 ## Configuration Files
 
 - `.env` - Environment variables (not committed to git)
@@ -224,33 +242,46 @@ backend/app/
 ### Navigator Agent Architecture
 #### File Structure
 - `navigator_agent.py` - Main agent class with async navigate_and_extract_batch() method
-- `navigator_web_crawler.py` - Crawl4AI web crawling utilities with intelligent navigation
+- `navigator_web_crawler.py` - Original Crawl4AI web crawling utilities (V1)
+- `navigator_web_crawler_v2.py` - V2 simplified systematic contact extraction implementation
 - `navigator_content_extractor.py` - LLM-based content extraction and validation
-- Separation of concerns: crawling vs. extraction vs. validation
+- `navigator_llm_processor.py` - Gemini Flash integration for contact information structuring
+- Separation of concerns: crawling vs. extraction vs. validation vs. LLM processing
 
-#### Data Flow
+#### V2 Implementation Components
+- **NavigatorWebCrawlerV2**: Main crawler class with simplified systematic approach
+- **ContactExtractor**: Specialized component for comprehensive contact information extraction
+- **MarkdownGenerator**: Structured markdown generation following V2 schema specification
+- **LLMProcessor**: Gemini Flash integration for structuring extracted contact information
+- **PartnerContactDetails**: V2 contact schema with decision_maker, contact_info, contact_channel fields
+
+#### V2 Data Flow
 1. Receive ScrapedBusinessData objects from Scout Agent
-2. Use Crawl4AI to render dynamic JavaScript content from partner websites
-3. Intelligently navigate to Staff/Team/Leadership pages using keyword matching
-4. Extract clean Markdown content from relevant pages
-5. Use Gemini Flash LLM to extract decision-maker contact information
-6. Validate and normalize extracted data
-7. Return PartnerEnrichment objects for Researcher Agent enhancement
+2. Scan entire base page for links and contact information using NavigatorWebCrawlerV2
+3. Discover navigation pages with header/footer prioritization (Contact > About > Team > Events)
+4. Systematically crawl each navigation page extracting ALL contact information
+5. Use ContactExtractor to extract emails, phone numbers, and social media handles with name association
+6. Generate structured markdown using MarkdownGenerator with decision_maker/contact_info/contact_channel schema
+7. Process markdown with LLMProcessor using Gemini Flash for structured extraction and validation
+8. Return PartnerEnrichment objects with all_contacts field populated with validated PartnerContactDetails
 
-#### Key Features
-- **Dynamic Content Handling**: Full JavaScript rendering with Crawl4AI and Playwright
-- **Intelligent Navigation**: Automatic discovery of relevant contact pages
-- **LLM Integration**: Structured contact extraction using Gemini Flash
-- **Concurrent Processing**: Configurable concurrent crawling with semaphore control
-- **Comprehensive Validation**: Email, phone, and contact channel validation
-- **Timeout Management**: Per-entity and per-page timeout handling
-- **Retry Logic**: Exponential backoff for network failures and rate limits
+#### Key V2 Features
+- **Systematic Extraction**: No relevance filtering - extracts ALL contact information found
+- **Header/Footer Navigation**: Prioritized navigation page discovery with fallback mechanisms
+- **Comprehensive Contact Types**: Emails, phone numbers, social media handles (WhatsApp, Facebook, LinkedIn, Instagram)
+- **Name Association**: Proximity-based analysis to associate names with contact information
+- **Simplified Configuration**: Minimal Crawl4AI setup with basic browser configuration
+- **Graceful Failure Handling**: Continues processing with partial results when individual pages fail
+- **Structured Schema**: Consistent decision_maker/contact_info/contact_channel output format via PartnerContactDetails
+- **LLM Integration**: Gemini Flash model with consistent temperature settings for reliable extraction
+- **Validation & Fallback**: JSON parsing with regex-based fallback for malformed responses
 
 ## Documentation
 
 - `documentation/` - Project documentation and diagrams
 - `documentation/prompts/` - AI agent prompt templates
 - `documentation/backup/` - Historical documentation
+
 
 # Technology Stack
 
@@ -339,11 +370,14 @@ All configuration is managed via environment variables in `.env` files:
 - `LOG_LEVEL` - Logging level (INFO or DEBUG)
 - `LEAD_GEN_TIMEOUT` - Pipeline timeout in seconds (default: 300)
 - `NAVIGATOR_TIMEOUT` - Navigator Agent timeout per entity in seconds (default: 180)
-- `NAVIGATOR_PAGE_TIMEOUT` - Navigator Agent page timeout in seconds (default: 90)
+- `NAVIGATOR_PAGE_TIMEOUT` - Navigator Agent page timeout in seconds (default: 60 for V2, 90 for V1)
 - `NAVIGATOR_MAX_RETRIES` - Navigator Agent max retry attempts (default: 3)
 - `NAVIGATOR_CONCURRENT_LIMIT` - Navigator Agent concurrent crawl limit (default: 5)
 - `NAVIGATOR_TEMPERATURE` - Navigator Agent LLM temperature (default: 0.1)
+- `NAVIGATOR_V2_TEMPERATURE` - Navigator Agent V2 LLM temperature (default: 0.1)
+- `NAVIGATOR_V2_MAX_TOKENS` - Navigator Agent V2 LLM max tokens (default: 2048)
 - `CRAWL4AI_HEADLESS` - Crawl4AI headless browser mode (default: true)
+- `CRAWL4AI_JAVASCRIPT` - Crawl4AI JavaScript execution (default: true for V2)
 - `CRAWL4AI_STEALTH` - Crawl4AI stealth mode (default: true)
 
 ## Architecture Patterns
@@ -404,13 +438,15 @@ ngrok http 8000
 - **Async Pattern**: Fully async implementation for non-blocking pipeline execution
 
 #### Navigator Agent Implementation
-- **Purpose**: Intelligent web crawling and decision-maker contact extraction
+- **Purpose**: Systematic web crawling and comprehensive contact extraction
 - **Technology**: Crawl4AI with Playwright for dynamic JavaScript content rendering
-- **Navigation Strategy**: Intelligently discovers Staff/Team/Leadership pages using keyword matching
-- **Content Processing**: Converts website content to clean Markdown for LLM analysis
+- **V2 Architecture**: Simplified systematic approach with NavigatorWebCrawlerV2 and ContactExtractor components
+- **Navigation Strategy**: Header/footer prioritized navigation page discovery (Contact > About > Team > Events)
+- **Content Processing**: Comprehensive contact extraction without relevance filtering
+- **Contact Extraction**: Systematic extraction of emails, phone numbers, and social media handles with name association
 - **LLM Integration**: Uses Gemini Flash model for structured contact information extraction
-- **Output**: Returns PartnerEnrichment objects with decision-maker details and contact information
-- **Timeout Handling**: 180-second timeout per entity with retry mechanisms
+- **Output**: Returns PartnerEnrichment objects with all_contacts field containing comprehensive contact data
+- **Timeout Handling**: 60-second page timeout with retry mechanisms and graceful failure handling
 
 #### Researcher Agent Implementation
 - **Purpose**: Enhances Navigator Agent results with additional enrichment and fallback data
@@ -427,3 +463,5 @@ ngrok http 8000
 - Include timing information for performance monitoring
 - Scout Agent includes scraping performance metrics and rate limiting logs
 - Navigator Agent includes web crawling metrics, LLM extraction timing, and retry attempt logs
+- Navigator Agent V2 includes systematic contact extraction metrics and navigation page discovery logs
+- LLMProcessor includes Gemini Flash processing metrics, JSON parsing validation, and fallback extraction logs

@@ -13,6 +13,7 @@ import os
 import re
 from typing import List, Optional, Dict, Any, Tuple
 from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
 from urllib.parse import urljoin, urlparse
 
 # Configure logging
@@ -536,9 +537,10 @@ class NavigatorWebCrawlerV2:
                 ignore_https_errors=True
             )
             
-            # Create crawler with basic configuration
+            # Create crawler with explicit strategy
+            strategy = AsyncPlaywrightCrawlerStrategy(browser_config=config)
             crawler = AsyncWebCrawler(
-                browser_config=config,
+                crawler_strategy=strategy,
                 verbose=False
             )
             
