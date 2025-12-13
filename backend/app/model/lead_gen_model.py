@@ -143,6 +143,7 @@ class PartnerProfile(BaseModel):
 class PartnerContact(BaseModel):
     name: str
     contact_info: str
+    url: str
     class Config:
         frozen = True
 

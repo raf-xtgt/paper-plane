@@ -43,6 +43,8 @@ class NavigatorCrawler:
             await self._handle_dynamic_content(page)
 
             page_contacts = await self._extract_contacts(page)
+            for contact in page_contacts:
+                contact['url'] = url
             self.contacts.extend(page_contacts)
 
             new_subpages = await self._find_subpages(page)
