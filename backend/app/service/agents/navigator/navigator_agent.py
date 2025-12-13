@@ -14,6 +14,7 @@ import google.generativeai as genai
 from app.model.lead_gen_model import ScrapedBusinessData, PartnerEnrichment
 from app.service.agents.navigator.navigator_web_crawler import NavigatorWebCrawler
 from app.service.agents.navigator.navigator_content_extractor import NavigatorContentExtractor
+from app.service.agents.navigator.navigator_llm_processor import PartnerContactDetails, LLMProcessor
 import re
 from pydantic import ValidationError
 
