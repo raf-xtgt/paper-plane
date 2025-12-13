@@ -211,7 +211,7 @@ class NavigatorWebCrawlerV2:
             
             # Check if link matches target navigation pages
             link_lower = link.lower()
-            for target_page in self.target_pages:
+            for target_page in self.target_navigation_keywords:
                 if target_page.replace(" ", "") in link_lower or target_page.replace(" ", "-") in link_lower:
                     navigation_pages.append(link)
                     logger.debug(f"Found navigation page: {link} (matches '{target_page}')")
@@ -887,4 +887,13 @@ class MarkdownGenerator:
             sections.append("")
         
         # Summary section
-        channel_cou
+        channel_counts = {}
+        for contact in contacts:
+            channel = contact.get("contact_channel", "Others")
+            channel_counts[channel] = channel_counts.get(channel, 0) + 1
+        
+        sections.append("## Contact Summary by Channel")
+        for channel, count in sorted(channel_counts.items()):
+            sections.append(f"- **{channel}:** {count} contact(s)")
+        
+        return "\n".join(sections)
