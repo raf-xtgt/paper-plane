@@ -184,21 +184,41 @@ class NavigatorWebCrawlerV2:
     
     def _find_navigation_pages(self, links: List[str]) -> List[str]:
         """
-        Find About/Contact/Team pages in navigation.
+        Find About/Contact/Team pages in navigation with header/footer prioritization.
         
-        Search order: Header navigation first, then footer if needed.
-        Target pages: "About", "About Us", "Contact", "Contact Us", "Events", "Team"
+        Enhanced V2 approach:
+        1. Categorize links by priority (Contact > About > Team > Events)
+        2. Distinguish header vs footer navigation context
+        3. Implement fallback search when header yields insufficient results
+        4. Return prioritized list with header pages preferred over footer pages
         
         Args:
             links: List of all links found on base page
             
         Returns:
-            List of navigation page URLs to crawl
+            Prioritized list of navigation page URLs to crawl
         """
-        navigation_pages = []
+        logger.debug(f"Searching for navigation pages in {len(links)} links with prioritization")
+        
+        # Define priority order for navigation pages (higher number = higher priority)
+        page_priorities = {
+            "contact": 4,
+            "contact us": 4,
+            "about": 3,
+            "about us": 3,
+            "team": 2,
+            "staff": 2,
+            "leadership": 2,
+            "events": 1
+        }
+        
+        # Categorize found navigation pages
+        header_pages = []  # Assume first occurrence is likely header
+        footer_pages = []  # Later occurrences might be footer
         processed_urls = set()
         
-        logger.debug(f"Searching for navigation pages in {len(links)} links")
+        # Track found pages by type to detect duplicates
+        found_page_types = set()
         
         for link in links:
             if link in processed_urls:
@@ -211,22 +231,85 @@ class NavigatorWebCrawlerV2:
             
             # Check if link matches target navigation pages
             link_lower = link.lower()
+            matched_page_type = None
+            matched_priority = 0
+            
             for target_page in self.target_navigation_keywords:
-                if target_page.replace(" ", "") in link_lower or target_page.replace(" ", "-") in link_lower:
-                    navigation_pages.append(link)
-                    logger.debug(f"Found navigation page: {link} (matches '{target_page}')")
+                # More flexible matching patterns
+                target_clean = target_page.replace(" ", "")
+                target_dash = target_page.replace(" ", "-")
+                target_underscore = target_page.replace(" ", "_")
+                
+                if (target_clean in link_lower or 
+                    target_dash in link_lower or 
+                    target_underscore in link_lower or
+                    target_page.lower() in link_lower):
+                    
+                    matched_page_type = target_page.lower()
+                    matched_priority = page_priorities.get(matched_page_type, 1)
                     break
+            
+            if matched_page_type:
+                # Determine if this is likely header or footer based on occurrence
+                if matched_page_type not in found_page_types:
+                    # First occurrence - likely header navigation
+                    header_pages.append({
+                        "url": link,
+                        "type": matched_page_type,
+                        "priority": matched_priority
+                    })
+                    found_page_types.add(matched_page_type)
+                    logger.debug(f"Found header navigation page: {link} (type: '{matched_page_type}', priority: {matched_priority})")
+                else:
+                    # Duplicate occurrence - likely footer navigation
+                    footer_pages.append({
+                        "url": link,
+                        "type": matched_page_type,
+                        "priority": matched_priority
+                    })
+                    logger.debug(f"Found footer navigation page: {link} (type: '{matched_page_type}', priority: {matched_priority})")
         
-        # Remove duplicates while preserving order
-        unique_pages = []
-        seen = set()
-        for page in navigation_pages:
-            if page not in seen:
-                unique_pages.append(page)
-                seen.add(page)
+        # Sort pages by priority (highest first)
+        header_pages.sort(key=lambda x: x["priority"], reverse=True)
+        footer_pages.sort(key=lambda x: x["priority"], reverse=True)
         
-        logger.info(f"Identified {len(unique_pages)} navigation pages to crawl")
-        return unique_pages
+        # Implement fallback logic
+        min_required_pages = 2  # Minimum pages needed for comprehensive extraction
+        
+        if len(header_pages) >= min_required_pages:
+            # Header navigation is sufficient
+            selected_pages = header_pages
+            logger.info(f"Using header navigation: {len(header_pages)} pages found")
+        else:
+            # Fallback: combine header and footer, prioritizing header
+            selected_pages = header_pages + footer_pages
+            logger.info(f"Using header + footer fallback: {len(header_pages)} header + {len(footer_pages)} footer pages")
+        
+        # Extract URLs in priority order, removing duplicates
+        prioritized_urls = []
+        seen_urls = set()
+        
+        for page in selected_pages:
+            url = page["url"]
+            if url not in seen_urls:
+                prioritized_urls.append(url)
+                seen_urls.add(url)
+        
+        # Limit to reasonable number of pages to avoid excessive crawling
+        max_pages = 6
+        if len(prioritized_urls) > max_pages:
+            prioritized_urls = prioritized_urls[:max_pages]
+            logger.debug(f"Limited navigation pages to {max_pages} highest priority pages")
+        
+        logger.info(f"Identified {len(prioritized_urls)} prioritized navigation pages to crawl")
+        
+        # Log the final prioritized list for debugging
+        for i, url in enumerate(prioritized_urls, 1):
+            page_info = next((p for p in selected_pages if p["url"] == url), None)
+            if page_info:
+                logger.debug(f"Priority {i}: {url} (type: {page_info['type']}, priority: {page_info['priority']})")
+        
+        return prioritized_urls
     
     async def _crawl_navigation_page(self, url: str) -> Optional[Dict[str, Any]]:
         """
