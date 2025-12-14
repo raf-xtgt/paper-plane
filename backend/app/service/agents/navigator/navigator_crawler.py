@@ -74,12 +74,12 @@ class NavigatorCrawler:
         # Emails
         emails = set(re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', content))
         for email in emails:
-            found_contacts.append({"name": "Extracted Email", "contact_info": email})
+            found_contacts.append({"name": "Email", "contact_info": email})
 
         # Phone Numbers (US format for example)
         phones = set(re.findall(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', content))
         for phone in phones:
-            found_contacts.append({"name": "Extracted Phone", "contact_info": phone})
+            found_contacts.append({"name": "Phone", "contact_info": phone})
 
         # Social Media (Basic check)
         socials = ["facebook.com", "twitter.com", "linkedin.com", "instagram.com"]
