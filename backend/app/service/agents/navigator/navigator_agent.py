@@ -116,7 +116,9 @@ class NavigatorAgent:
         
         # Execute all tasks and collect results
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        return results
+        # Flatten the list of lists into a single list of PartnerContact
+        flat_results = [item for sublist in results if isinstance(sublist, set) for item in sublist]
+        return flat_results
     
     async def navigate_and_extract(
         self, 
