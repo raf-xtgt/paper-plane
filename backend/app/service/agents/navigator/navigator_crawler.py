@@ -12,26 +12,26 @@ class NavigatorCrawler:
         self.contacts: List[Dict[str, str]] = []
         self.subpages_queue: List[str] = []
 
-    async def start(self, url: str):
+    async def start(self, lead_guid:str, url: str):
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
             # Initial crawl
-            await self.crawl(page, url)
+            await self.crawl(page, url, lead_guid)
 
             # Process subpages recursively
             while self.subpages_queue:
                 next_url = self.subpages_queue.pop(0)
                 if next_url not in self.visited_urls:
-                    await self.crawl(page, next_url)
+                    await self.crawl(page, next_url, lead_guid)
 
             await browser.close()
             # self.save_results()
             return self._map_contacts_to_dto()
 
 
-    async def crawl(self, page: Page, url: str):
+    async def crawl(self, page: Page, url: str, lead_guid:str):
         if url in self.visited_urls:
             return
 
@@ -45,6 +45,7 @@ class NavigatorCrawler:
             page_contacts = await self._extract_contacts(page)
             for contact in page_contacts:
                 contact['url'] = url
+                contact['lead_guid'] = lead_guid
             self.contacts.extend(page_contacts)
 
             new_subpages = await self._find_subpages(page)

@@ -96,6 +96,7 @@ class NavigatorAgent:
             async with semaphore:
                 try:
                     return await self.navigate_and_extract(
+                        lead_guid = data.guid,
                         website_url=data.website_url,
                         entity_name=data.org_name or f"Partner_{index}"
                     )
@@ -121,7 +122,8 @@ class NavigatorAgent:
         return flat_results
     
     async def navigate_and_extract(
-        self, 
+        self,
+        lead_guid: str,
         website_url: str, 
         entity_name: str
     ) -> List[PartnerContact]:
@@ -144,7 +146,7 @@ class NavigatorAgent:
         logger.info(f"V2 processing {entity_name} at {website_url}")
         
         try:
-            structured_contacts = await self.crawler.start(website_url)
+            structured_contacts = await self.crawler.start(lead_guid, website_url)
             duration = asyncio.get_event_loop().time() - start_time
             logger.info(
                 f"V2 processing completed for {entity_name} in {duration:.2f}s - "

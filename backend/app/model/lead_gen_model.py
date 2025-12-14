@@ -8,7 +8,7 @@ including API request/response models, agent output schemas, and Kafka message f
 from pydantic import BaseModel, HttpUrl, Field
 from typing import Optional, Literal, List
 from datetime import datetime
-
+import uuid
 
 # API Request/Response Models
 
@@ -141,6 +141,7 @@ class PartnerProfile(BaseModel):
 
 
 class PartnerContact(BaseModel):
+    lead_guid:str
     name: str
     contact_info: str
     url: str
@@ -194,6 +195,10 @@ class ScrapedBusinessData(BaseModel):
     """
     Raw data extracted from Google Maps business card.
     """
+    guid: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique identifier"
+    )
     org_name: Optional[str] = Field(None, description="Organization name")
     primary_contact: Optional[str] = Field(None, description="Phone number")
     review_score: Optional[str] = Field(None, description="Review score")
