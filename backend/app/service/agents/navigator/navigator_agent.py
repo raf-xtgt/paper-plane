@@ -66,7 +66,7 @@ class NavigatorAgent:
     async def navigate_and_extract_batch(
         self, 
         scraped_data: List[ScrapedBusinessData]
-    ) -> List[PartnerEnrichment]:
+    ) -> List[PartnerContact]:
         """
         Process multiple partners asynchronously.
         
@@ -91,7 +91,7 @@ class NavigatorAgent:
         # Create semaphore to limit concurrent processing
         semaphore = asyncio.Semaphore(self.concurrent_limit)
         
-        async def process_with_semaphore(data: ScrapedBusinessData, index: int) -> PartnerEnrichment:
+        async def process_with_semaphore(data: ScrapedBusinessData, index: int) -> List[PartnerContact]:
             """Process single partner with semaphore control."""
             async with semaphore:
                 try:
@@ -102,12 +102,12 @@ class NavigatorAgent:
                 except Exception as e:
                     logger.error(f"Failed to process partner {index} ({data.org_name}): {e}")
                     # Return incomplete enrichment for failed processing
-                    return PartnerEnrichment(
-                        verified_url=data.website_url,
-                        status="incomplete",
-                        all_contacts=[]
-                    )
-        
+                    return [PartnerContact(
+                            name="NA",
+                            contact_info="NA",
+                            url="NA"
+                        )]
+
         # Process all partners concurrently with limit
         tasks = [
             process_with_semaphore(data, i) 
@@ -116,34 +116,7 @@ class NavigatorAgent:
         
         # Execute all tasks and collect results
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Process results and handle any remaining exceptions
-        enrichments = []
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                logger.error(f"Unexpected exception for partner {i}: {result}")
-                # Create fallback incomplete enrichment
-                try:
-                    enrichments.append(PartnerEnrichment(
-                        verified_url=valid_data[i].website_url,
-                        status="incomplete",
-                        all_contacts=[]
-                    ))
-                except Exception as fallback_error:
-                    logger.error(f"Failed to create fallback enrichment: {fallback_error}")
-            else:
-                enrichments.append(result)
-        
-        successful_count = sum(1 for e in enrichments if e.status == "complete")
-        total_contacts = sum(len(e.all_contacts or []) for e in enrichments)
-        avg_contacts_per_partner = total_contacts / len(enrichments) if enrichments else 0
-        
-        logger.info(
-            f"Completed V2 batch processing: {len(enrichments)} total, "
-            f"{successful_count} successful, {len(enrichments) - successful_count} incomplete, "
-            f"{total_contacts} total contacts extracted, {avg_contacts_per_partner:.1f} avg contacts per partner"
-        )
-        return enrichments
+        return results
     
     async def navigate_and_extract(
         self, 
@@ -182,12 +155,14 @@ class NavigatorAgent:
             return [PartnerContact(
                 name="NA",
                 contact_info="NA",
+                url="NA"
             )]
         except Exception as e:
             logger.error(f"V2 error processing {entity_name}: {e}")
             return [PartnerContact(
                 name="NA",
                 contact_info="NA",
+                url="NA"
             )]
     
     def _create_v2_partner_enrichment(
