@@ -119,24 +119,36 @@ class OutreachDraft(BaseModel):
 
 class PartnerProfile(BaseModel):
     """
-    Partner profile data for Kafka message.
-    
-    Attributes:
-        name: Partner organization name
-        url: Partner website URL
-        contact_person: Name of the contact person
-        contact_method: Contact method (email, phone, WhatsApp)
-        contact_channel: Preferred contact channel (WhatsApp, Email, Messenger, Instagram, PhoneNo)
-        entity_type: Type of partner entity
+    Partner profile data for Kafka message, adhering to the new schema.
     """
-    name: str = Field(..., description="Partner name")
-    url: HttpUrl = Field(..., description="Partner website")
-    contact_person: Optional[str] = Field(None, description="Contact person name")
-    contact_method: Optional[str] = Field(None, description="Contact method")
-    contact_channel: Optional[Literal["WhatsApp", "Email", "Messenger", "Instagram", "PhoneNo"]] = Field(
-        None, description="Preferred contact channel"
+    guid: str = Field(
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Unique identifier (UUID)"
     )
-    entity_type: str = Field(..., description="Entity type")
+    emails: Optional[List[str]] = Field(
+        None, description="List of email addresses found"
+    )
+    phone_numbers: Optional[List[str]] = Field(
+        None, description="List of phone numbers found"
+    )
+    internal_urls: Optional[List[str]] = Field(
+        None, description="List of internal URLs discovered"
+    )
+    external_urls: Optional[List[str]] = Field(
+        None, description="List of external URLs discovered"
+    )
+    org_name: str = Field(
+        ..., description="Partner organization name"
+    )
+    primary_contact: Optional[str] = Field(
+        None, description="Primary contact information (e.g., name or phone/email)"
+    )
+    entity_type: str = Field(
+        ..., description="Type of partner entity (e.g., 'vendor', 'client')"
+    )
+    lead_phase: Optional[str] = Field(
+        None, description="Current phase in the lead pipeline (e.g., 'new', 'contacted')"
+    )
 
 
 
