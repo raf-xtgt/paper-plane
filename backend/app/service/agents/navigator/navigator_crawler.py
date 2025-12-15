@@ -77,8 +77,17 @@ class NavigatorCrawler:
         for email in emails:
             found_contacts.append({"name": "Email", "contact_info": email})
 
-        # Phone Numbers (US format for example)
-        phones = set(re.findall(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', content))
+        # Phone Numbers (US format)
+        # Pattern matches various US phone number formats:
+        # (123) 456-7890, 123-456-7890, 123.456.7890, 123 456 7890, +1-123-456-7890, etc.
+        phone_pattern = r'(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b'
+        phone_matches = re.findall(phone_pattern, content)
+        phones = set()
+        for match in phone_matches:
+            # Reconstruct phone number in standard format
+            formatted_phone = f"({match[0]}) {match[1]}-{match[2]}"
+            phones.add(formatted_phone)
+        
         for phone in phones:
             found_contacts.append({"name": "Phone", "contact_info": phone})
 
