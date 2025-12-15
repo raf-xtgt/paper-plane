@@ -12,7 +12,7 @@ import requests
 from typing import Optional, List
 from bs4 import BeautifulSoup
 import google.generativeai as genai
-from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment
+from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, PartnerProfile
 import json
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.researcher")
@@ -397,7 +397,7 @@ class ResearcherAgent:
                 status="incomplete"
             )
     
-    def enrich_partners_from_navigator(self, navigator_enrichments: List[PartnerEnrichment]) -> List[PartnerEnrichment]:
+    def enrich_partners_from_navigator(self, partner_profiles: List[PartnerProfile]) -> List[PartnerEnrichment]:
         """
         Enhance Navigator Agent enrichments with additional research and fallback data.
         
