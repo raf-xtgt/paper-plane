@@ -9,10 +9,11 @@ information, contact details, and key facts for personalization.
 import os
 import logging
 import asyncio
+import json
 from typing import List
 import google.generativeai as genai
 from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, PartnerProfile, PageMarkdown, \
-    ScrapedBusinessData
+    PageKeyFact, ScrapedBusinessData
 from app.service.agents.researcher.researcher_crawler import ResearcherCrawler
 
 # Configure logging
@@ -33,7 +34,7 @@ class ResearcherAgent:
     
     def __init__(self):
         """Initialize Researcher Agent with Gemini Flash model."""
-        self.model_name = os.getenv("ADK_MODEL_FLASH", "gemini-2.0-flash-exp")
+        self.model_name = os.getenv("ADK_MODEL_PRO", "gemini-2.0-flash")
         self.temperature = 0.2
         self.timeout = int(os.getenv("RESEARCHER_TIMEOUT", "30"))
         
@@ -111,7 +112,7 @@ class ResearcherAgent:
                     contact_info=None,
                     contact_channel=None,
                     key_fact=f"Error processing: {str(e)[:100]}",
-                    verified_url=profile.internal_urls[0] if profile.internal_urls else "https://example.com",
+                    verified_url=profile.website_url if profile.website_url else "https://example.com",
                     status="incomplete",
                     all_contacts=None
                 )
@@ -120,115 +121,227 @@ class ResearcherAgent:
         logger.info(f"Enrichment complete. Processed {len(enrichments)} partners")
         return enrichments
     
-    def _process_markdown_content(self, profile: PartnerProfile, page_markdowns: List[PageMarkdown]) -> PartnerEnrichment:
+    def _process_markdown_content(self, profile: ScrapedBusinessData, page_markdowns: List[PageMarkdown]) -> PartnerEnrichment:
         """
-        Process crawled markdown content to extract enrichment data.
+        Process crawled markdown content to extract enrichment data and key facts.
         
         Args:
-            profile: Original PartnerProfile
+            profile: Original ScrapedBusinessData profile
             page_markdowns: List of PageMarkdown objects from crawling
             
         Returns:
             PartnerEnrichment object with extracted data
         """
         try:
-            # Combine all markdown content for analysis
+            # Process each page to extract key facts
+            page_key_facts = []
+            
+            for page_markdown in page_markdowns:
+                try:
+                    logger.debug(f"Processing page: {page_markdown.page_url}")
+                    
+                    # Skip if content is too short
+                    if len(page_markdown.markdown_content.strip()) < 100:
+                        logger.debug(f"Skipping page with insufficient content: {page_markdown.page_url}")
+                        continue
+                    
+                    # Extract key facts from this page using LLM
+                    key_facts = self._extract_key_facts_from_page(page_markdown, profile.org_name)
+                    
+                    if key_facts:
+                        page_key_fact = PageKeyFact(
+                            page_url=page_markdown.page_url,
+                            markdown_content=page_markdown.markdown_content,
+                            key_facts=key_facts
+                        )
+                        page_key_facts.append(page_key_fact)
+                        logger.debug(f"Extracted {len(key_facts)} key facts from {page_markdown.page_url}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing page {page_markdown.page_url}: {e}")
+                    continue
+            
+            # Combine all content for comprehensive analysis
             combined_content = ""
-            for page in page_markdowns:
-                combined_content += f"\n\n--- Page: {page.page_url} ---\n"
-                combined_content += page.markdown_content
+            all_key_facts = []
+            
+            for page_fact in page_key_facts:
+                combined_content += f"\n\n--- Page: {page_fact.page_url} ---\n"
+                combined_content += page_fact.markdown_content[:2000]  # Limit per page
+                all_key_facts.extend(page_fact.key_facts)
             
             if not combined_content.strip():
                 logger.warning(f"No content extracted for {profile.org_name}")
-                return PartnerEnrichment(
-                    decision_maker=None,
-                    contact_info=None,
-                    contact_channel=None,
-                    key_fact=None,
-                    verified_url=profile.internal_urls[0] if profile.internal_urls else "https://example.com",
-                    status="incomplete",
-                    all_contacts=None
-                )
+                return self._create_fallback_enrichment(profile)
             
-            # Use Gemini to extract structured data from markdown content
+            # Extract comprehensive enrichment data using LLM
+            enrichment_data = self._extract_enrichment_data(combined_content, profile.org_name, all_key_facts)
+            
+            # Determine status based on extracted data
+            status = "complete" if (
+                enrichment_data.get("decision_maker") and 
+                enrichment_data.get("contact_info")
+            ) else "incomplete"
+            
+            # Create enrichment object
+            enrichment = PartnerEnrichment(
+                decision_maker=enrichment_data.get("decision_maker"),
+                contact_info=enrichment_data.get("contact_info") or profile.primary_contact,
+                contact_channel=enrichment_data.get("contact_channel"),
+                key_fact=enrichment_data.get("key_fact"),
+                verified_url=profile.website_url if profile.website_url else "https://example.com",
+                status=status,
+                all_contacts=None  # Could be populated with detailed contact extraction
+            )
+            
+            logger.info(f"Successfully processed {profile.org_name} - status: {status}, key_facts: {len(all_key_facts)}")
+            return enrichment
+            
+        except Exception as e:
+            logger.error(f"Error processing markdown content for {profile.org_name}: {e}")
+            return self._create_fallback_enrichment(profile)
+    
+    def _extract_key_facts_from_page(self, page_markdown: PageMarkdown, org_name: str) -> List[str]:
+        """
+        Extract 1-3 key facts from a single page using LLM.
+        
+        Args:
+            page_markdown: PageMarkdown object with content
+            org_name: Organization name for context
+            
+        Returns:
+            List of 1-3 key facts extracted from the page
+        """
+        try:
+            # Limit content to avoid token limits
+            content = page_markdown.markdown_content[:4000]
+            
             prompt = f"""
-            Analyze the following website content for the organization "{profile.org_name}" and extract:
+            Analyze the following webpage content for the organization "{org_name}" and extract 1-3 key facts that would be useful for business outreach and personalization.
+
+            Focus on:
+            - Awards, achievements, or recognition
+            - Specialties, services, or unique offerings
+            - Leadership information or key personnel
+            - Company milestones, history, or notable projects
+            - Location details, branches, or service areas
+            - Mission, values, or company culture highlights
+
+            Page URL: {page_markdown.page_url}
+            Content:
+            {content}
+
+            Respond with a JSON array of 1-3 key facts (strings only):
+            """
+
+            output_format = """\n
+            ```
+            {
+                "key_facts":["Fact 1", "Fact 2", "Fact 3"]
+            }
+            ```
+            """
+            
+            response = self.model.generate_content(prompt+output_format)
+            
+            if response and response.text:
+                import json
+                try:
+                    key_facts = json.loads(response.text.strip())
+                    
+                    # Validate response format
+                    if isinstance(key_facts, list) and len(key_facts) <= 3:
+                        # Filter out empty or very short facts
+                        valid_facts = [fact for fact in key_facts if isinstance(fact, str) and len(fact.strip()) > 10]
+                        logger.debug(f"Extracted {len(valid_facts)} key facts from {page_markdown.page_url}")
+                        return valid_facts[:3]  # Ensure max 3 facts
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse key facts JSON for {page_markdown.page_url}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error extracting key facts from {page_markdown.page_url}: {e}")
+        
+        return []
+    
+    def _extract_enrichment_data(self, combined_content: str, org_name: str, all_key_facts: List[str]) -> dict:
+        """
+        Extract comprehensive enrichment data from combined content.
+        
+        Args:
+            combined_content: Combined markdown content from all pages
+            org_name: Organization name
+            all_key_facts: All extracted key facts from individual pages
+            
+        Returns:
+            Dictionary with enrichment data
+        """
+        try:
+            # Select the most relevant key fact
+            best_key_fact = all_key_facts[0] if all_key_facts else None
+            
+            prompt = f"""
+            Analyze the following website content for the organization "{org_name}" and extract:
 
             1. Decision maker name (CEO, Director, Principal, Manager, etc.)
             2. Best contact information (email or phone number)
             3. Preferred contact channel (WhatsApp, Email, Messenger, Instagram, PhoneNo, Others)
-            4. One key fact for personalization (awards, achievements, specialties, branches, motto, etc.)
+            4. Select the most relevant key fact from the provided list for personalization
 
-            Website Content:
-            {combined_content[:8000]}  # Limit content to avoid token limits
+            Available Key Facts:
+            {json.dumps(all_key_facts) if all_key_facts else "None available"}
+
+            Website Content (first 6000 chars):
+            {combined_content[:6000]}
 
             Respond in this exact JSON format:
             {{
                 "decision_maker": "Name or null",
                 "contact_info": "email@example.com or phone number or null",
                 "contact_channel": "WhatsApp|Email|Messenger|Instagram|PhoneNo|Others or null",
-                "key_fact": "One interesting fact or null"
+                "key_fact": "Most relevant key fact from the list or null"
             }}
             """
             
-            try:
-                response = self.model.generate_content(prompt)
-                
-                if response and response.text:
-                    # Parse the JSON response
-                    import json
-                    extracted_data = json.loads(response.text.strip())
-                    
-                    # Determine status based on extracted data
-                    status = "complete" if (
-                        extracted_data.get("decision_maker") and 
-                        extracted_data.get("contact_info")
-                    ) else "incomplete"
-                    
-                    # Get verified URL (prefer internal URLs)
-                    verified_url = (
-                        profile.internal_urls[0] if profile.internal_urls 
-                        else profile.external_urls[0] if profile.external_urls 
-                        else "https://example.com"
-                    )
-                    
-                    enrichment = PartnerEnrichment(
-                        decision_maker=extracted_data.get("decision_maker"),
-                        contact_info=extracted_data.get("contact_info"),
-                        contact_channel=extracted_data.get("contact_channel"),
-                        key_fact=extracted_data.get("key_fact"),
-                        verified_url=verified_url,
-                        status=status,
-                        all_contacts=None  # Could be populated with detailed contact extraction
-                    )
-                    
-                    logger.info(f"Successfully enriched {profile.org_name} - status: {status}")
-                    return enrichment
-                    
-                else:
-                    logger.warning(f"Empty response from Gemini for {profile.org_name}")
-                    
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse Gemini response for {profile.org_name}: {e}")
-            except Exception as e:
-                logger.error(f"Gemini API error for {profile.org_name}: {e}")
+            response = self.model.generate_content(prompt)
             
+            if response and response.text:
+                import json
+                try:
+                    enrichment_data = json.loads(response.text.strip())
+                    logger.debug(f"Successfully extracted enrichment data for {org_name}")
+                    return enrichment_data
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse enrichment JSON for {org_name}: {e}")
+                    
         except Exception as e:
-            logger.error(f"Error processing markdown content for {profile.org_name}: {e}")
+            logger.error(f"Error extracting enrichment data for {org_name}: {e}")
         
-        # Fallback enrichment
-        verified_url = (
-            profile.internal_urls[0] if profile.internal_urls 
-            else profile.external_urls[0] if profile.external_urls 
-            else "https://example.com"
-        )
+        # Return fallback data
+        return {
+            "decision_maker": None,
+            "contact_info": None,
+            "contact_channel": None,
+            "key_fact": best_key_fact
+        }
+    
+    def _create_fallback_enrichment(self, profile: ScrapedBusinessData) -> PartnerEnrichment:
+        """
+        Create a fallback enrichment when processing fails.
         
+        Args:
+            profile: Original ScrapedBusinessData profile
+            
+        Returns:
+            PartnerEnrichment with basic information
+        """
         return PartnerEnrichment(
             decision_maker=None,
-            contact_info=profile.primary_contact,  # Use existing contact if available
+            contact_info=profile.primary_contact,
             contact_channel="PhoneNo" if profile.primary_contact else None,
-            key_fact=f"Organization type: {profile.entity_type}",
-            verified_url=verified_url,
+            key_fact=f"Organization type: {profile.org_name}" if profile.org_name else None,
+            verified_url=profile.website_url if profile.website_url else "https://example.com",
             status="incomplete",
             all_contacts=None
         )
