@@ -12,8 +12,6 @@ import asyncio
 from typing import List, Optional, Dict, Any
 import google.generativeai as genai
 from app.model.lead_gen_model import ScrapedBusinessData, PartnerEnrichment, PartnerContactDetails
-from app.service.agents.navigator.navigator_content_extractor import NavigatorContentExtractor
-from app.service.agents.navigator.navigator_llm_processor import LLMProcessor
 from app.service.agents.navigator.navigator_crawler import NavigatorCrawler
 import re
 from pydantic import ValidationError
@@ -57,8 +55,6 @@ class NavigatorAgent:
         )
         
         # Initialize components
-        self.content_extractor = NavigatorContentExtractor(self.model)
-        self.llm_processor = LLMProcessor(model_name=self.model_name)
         self.data_validator = DataValidator()
         self.crawler = NavigatorCrawler()
         logger.info(f"Navigator Agent initialized with model: {self.model_name}")
