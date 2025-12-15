@@ -4,6 +4,7 @@ import logging
 from typing import List, Dict, Set
 from urllib.parse import urljoin, urlparse
 from playwright.async_api import async_playwright, Page
+from app.model.lead_gen_model import PageMarkdown
 
 logger = logging.getLogger("researcher_crawler")
 
@@ -17,12 +18,12 @@ class ResearcherCrawler:
     
     def __init__(self, max_pages: int = 50):
         self.visited_urls: Set[str] = set()
-        self.pages_data: List[Dict[str, str]] = []
+        self.pages_data: List[PageMarkdown] = []
         self.pages_queue: List[str] = []
         self.max_pages = max_pages
         self.base_domain = None
 
-    async def start(self, website_url: str) -> List[Dict[str, str]]:
+    async def start(self, website_url: str) -> List[PageMarkdown]:
         """
         Start crawling from the given website URL.
         
@@ -30,7 +31,7 @@ class ResearcherCrawler:
             website_url: The base URL to start crawling from
             
         Returns:
-            List of dictionaries containing page_url and markdown_content
+            List of PageMarkdown objects containing page_url and markdown_content
         """
         self.base_domain = urlparse(website_url).netloc
         
@@ -86,10 +87,10 @@ class ResearcherCrawler:
             markdown_content = await self._extract_markdown_content(page)
             
             # Store the page data
-            page_data = {
-                "page_url": url,
-                "markdown_content": markdown_content
-            }
+            page_data = PageMarkdown(
+                page_url=url,
+                markdown_content=markdown_content
+            )
             self.pages_data.append(page_data)
 
             # Find and queue new pages to crawl
@@ -327,8 +328,10 @@ class ResearcherCrawler:
             filename: Name of the output file
         """
         try:
+            # Convert PageMarkdown objects to dictionaries for JSON serialization
+            pages_dict = [page.model_dump() for page in self.pages_data]
             with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(self.pages_data, f, indent=2, ensure_ascii=False)
+                json.dump(pages_dict, f, indent=2, ensure_ascii=False)
             logger.info(f"Results saved to {filename}")
         except Exception as e:
             logger.error(f"Error saving results to file: {e}")
@@ -342,8 +345,8 @@ if __name__ == "__main__":
         
         print(f"Crawled {len(results)} pages:")
         for result in results:
-            print(f"- {result['page_url']}")
-            print(f"  Content length: {len(result['markdown_content'])} characters")
+            print(f"- {result.page_url}")
+            print(f"  Content length: {len(result.markdown_content)} characters")
         
         # Save results to file
         crawler.save_results_to_file()

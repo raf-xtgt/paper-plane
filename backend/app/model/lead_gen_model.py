@@ -203,6 +203,18 @@ class SearchQuery(BaseModel):
     query: str
 
 
+class PageMarkdown(BaseModel):
+    """
+    Crawled page data with markdown content.
+    
+    Attributes:
+        page_url: URL of the crawled page
+        markdown_content: Extracted content in markdown format
+    """
+    page_url: str = Field(..., description="URL of the crawled page")
+    markdown_content: str = Field(..., description="Extracted content in markdown format")
+
+
 class ScrapedBusinessData(BaseModel):
     """
     Raw data extracted from Google Maps business card.
