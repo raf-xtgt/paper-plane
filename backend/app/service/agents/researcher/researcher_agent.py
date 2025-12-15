@@ -8,12 +8,13 @@ information, contact details, and key facts for personalization.
 
 import os
 import logging
-import requests
-from typing import Optional, List
-from bs4 import BeautifulSoup
+import asyncio
+from typing import List
 import google.generativeai as genai
-from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, PartnerProfile
-import json
+from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, PartnerProfile, PageMarkdown, \
+    ScrapedBusinessData
+from app.service.agents.researcher.researcher_crawler import ResearcherCrawler
+
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.researcher")
 
@@ -53,486 +54,184 @@ class ResearcherAgent:
         }
         
         logger.info(f"Researcher Agent initialized with model: {self.model_name}, timeout: {self.timeout}s")
-    
-    def _get_system_prompt(self) -> str:
-        """
-        Generate system prompt for extracting partner information.
-        
-        Returns:
-            System prompt string for the agent
-        """
-        return """You are an Intelligence Researcher AI agent. Your task is to extract specific information from website content.
 
-        Extract the following information:
-        1. Decision-maker name: Look for titles like Principal, Head Doctor, Director, CEO, Founder, Head of School, Medical Director
-        2. Contact information: Email address, phone number, WhatsApp, Messenger, Instagram etc (prefer direct contact, not general info). 
-        The contact information may belong to the decision maker. If decision maker contact information is not found, then use any contact or outreach information. 
-        3. Contact channel: Identify the available contact channel based on the contact information found:
-           - "WhatsApp" if WhatsApp number is mentioned
-           - "Email" if email address is provided
-           - "Messenger" if Facebook Messenger is mentioned
-           - "Instagram" if Instagram handle is provided
-           - "PhoneNo" if only phone number is available
-        4. Key fact: One interesting fact for personalization such as:
-           - Recent awards or recognitions
-           - New branches or expansion
-           - Institutional motto or mission
-           - Years of establishment
-           - Notable achievements or milestones
-           - Unique programs or services
-
-        Return ONLY a JSON object with this exact structure:
-        {
-            "decision_maker": "Name of decision maker or null",
-            "contact_info": "Email/phone/WhatsApp or null",
-            "contact_channel": "WhatsApp|Email|Messenger|Instagram|PhoneNo or null",
-            "key_fact": "One interesting fact or null"
-        }
-
-        Rules:
-        - Return null for fields you cannot find
-        - Be precise - only extract information you are confident about
-        - For decision_maker, include their title (e.g., "Dr. John Smith, Medical Director")
-        - For contact_info, prefer direct contact over general info
-        - For contact_channel, choose the most appropriate channel based on available contact methods
-        - For key_fact, choose the most relevant for business outreach
-        - Return ONLY the JSON object, no additional text"""
     
-    def _fetch_page_content(self, url: str) -> Optional[str]:
+    def enrich_partners_from_navigator(self, partner_profiles: List[ScrapedBusinessData]) -> List[PartnerEnrichment]:
         """
-        Fetch HTML content from a URL with timeout.
+        Enrich partner profiles by crawling their internal and external URLs.
         
         Args:
-            url: Website URL to fetch
+            partner_profiles: List of PartnerProfile objects from Navigator Agent
             
         Returns:
-            HTML content as string, or None on failure
+            List of PartnerEnrichment objects with extracted data
         """
-        try:
-            logger.debug(f"Fetching URL: {url}")
-            response = requests.get(
-                url, 
-                headers=self.headers, 
-                timeout=self.timeout,
-                allow_redirects=True
-            )
-            response.raise_for_status()
-            
-            logger.debug(f"Successfully fetched {len(response.content)} bytes from {url}")
-            return response.text
-            
-        except requests.Timeout:
-            logger.warning(f"Timeout fetching URL: {url} (timeout: {self.timeout}s)")
-            return None
-        except requests.RequestException as e:
-            logger.warning(f"Failed to fetch URL: {url}, error: {str(e)}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error fetching URL: {url}, error: {str(e)}", exc_info=True)
-            return None
-    
-    def _find_relevant_pages(self, base_url: str, html_content: str) -> List[str]:
-        """
-        Find links to Contact, Staff, About Us, and Leadership pages.
+        logger.info(f"Starting enrichment for {len(partner_profiles)} partner profiles")
         
-        Args:
-            base_url: Base website URL
-            html_content: HTML content of the main page
-            
-        Returns:
-            List of relevant page URLs to scrape
-        """
-        try:
-            soup = BeautifulSoup(html_content, 'html.parser')
-            relevant_urls = [base_url]  # Always include main page
-            
-            # Keywords to look for in links
-            keywords = [
-                'contact', 'about', 'staff', 'team', 'leadership', 
-                'faculty', 'doctors', 'management', 'about-us', 
-                'our-team', 'meet-the-team', 'administration'
-            ]
-            
-            # Find all links
-            links = soup.find_all('a', href=True)
-            
-            for link in links:
-                href = link['href']
-                link_text = link.get_text().lower().strip()
-                
-                # Check if link text or href contains relevant keywords
-                if any(keyword in link_text or keyword in href.lower() for keyword in keywords):
-                    # Convert relative URLs to absolute
-                    if href.startswith('/'):
-                        full_url = base_url.rstrip('/') + href
-                    elif href.startswith('http'):
-                        full_url = href
-                    else:
-                        full_url = base_url.rstrip('/') + '/' + href
-                    
-                    if full_url not in relevant_urls:
-                        relevant_urls.append(full_url)
-                        logger.debug(f"Found relevant page: {full_url}")
-            
-            logger.info(f"Found {len(relevant_urls)} relevant pages for {base_url}")
-            return relevant_urls[:5]  # Limit to 5 pages to stay within timeout
-            
-        except Exception as e:
-            logger.warning(f"Failed to parse links from {base_url}, error: {str(e)}")
-            return [base_url]
-    
-    def _extract_text_content(self, html_content: str) -> str:
-        """
-        Extract clean text content from HTML.
+        enrichments = []
         
-        Args:
-            html_content: Raw HTML content
-            
-        Returns:
-            Cleaned text content
-        """
-        try:
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Remove script and style elements
-            for script in soup(["script", "style", "nav", "footer", "header"]):
-                script.decompose()
-            
-            # Get text
-            text = soup.get_text(separator='\n')
-            
-            # Clean up whitespace
-            lines = (line.strip() for line in text.splitlines())
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            text = '\n'.join(chunk for chunk in chunks if chunk)
-            
-            return text
-            
-        except Exception as e:
-            logger.warning(f"Failed to extract text content, error: {str(e)}")
-            return ""
-    
-    def _extract_info_with_llm(self, text_content: str, entity_name: str) -> dict:
-        """
-        Use Gemini to extract structured information from text content.
-        
-        Args:
-            text_content: Cleaned text content from website
-            entity_name: Name of the partner entity
-            
-        Returns:
-            Dictionary with decision_maker, contact_info, contact_channel, and key_fact
-        """
-        try:
-            system_prompt = self._get_system_prompt()
-            
-            # Truncate content if too long (keep first 4000 chars)
-            if len(text_content) > 4000:
-                text_content = text_content[:4000] + "\n... [content truncated]"
-            
-            user_prompt = f"""
-            Entity Name: {entity_name}                
-            Website Content:
-            {text_content}
-                
-            Extract the decision-maker name, contact information, contact channel, and one key fact from the above content.
-            """
-            
-            logger.debug(f"Sending {len(text_content)} chars to Gemini for extraction")
-            response = self.model.generate_content([system_prompt, user_prompt])
-            
-            # Parse JSON response
-            response_text = response.text.strip()
-            
-            # Remove markdown code blocks if present
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            
-            response_text = response_text.strip()
-            
-            extracted_data = json.loads(response_text)
-            
-            logger.debug(f"Successfully extracted data: {extracted_data}")
-            return extracted_data
-            
-        except json.JSONDecodeError as e:
-            logger.error(
-                f"Failed to parse LLM JSON response for {entity_name}, error: {str(e)}",
-                exc_info=True
-            )
-            logger.debug(f"Raw LLM response: {response.text if 'response' in locals() else 'N/A'}")
-            return {"decision_maker": None, "contact_info": None, "contact_channel": None, "key_fact": None}
-        except Exception as e:
-            logger.error(
-                f"LLM extraction failed for {entity_name}, error: {str(e)}",
-                exc_info=True
-            )
-            return {"decision_maker": None, "contact_info": None, "contact_channel": None, "key_fact": None}
-    
-    def enrich_partner(self, partner: PartnerDiscovery) -> PartnerEnrichment:
-        """
-        Enrich a single partner with contact details and key facts.
-        
-        Args:
-            partner: PartnerDiscovery object from Scout Agent
-            
-        Returns:
-            PartnerEnrichment object with status (complete/incomplete)
-        """
-        logger.info(f"Starting enrichment for: {partner.entity_name} ({partner.website_url})")
-        
-        try:
-            # Fetch main page content
-            main_content = self._fetch_page_content(str(partner.website_url))
-            
-            if not main_content:
-                logger.warning(
-                    f"Failed to fetch main page for {partner.entity_name} - "
-                    f"URL: {partner.website_url} - Marking as incomplete for manual review"
-                )
-                return PartnerEnrichment(
-                    decision_maker=None,
-                    contact_info=None,
-                    contact_channel=None,
-                    key_fact=None,
-                    verified_url=partner.website_url,
-                    status="incomplete"
-                )
-            
-            # Find relevant pages
-            relevant_pages = self._find_relevant_pages(str(partner.website_url), main_content)
-            
-            # Collect text content from all relevant pages
-            all_text_content = []
-            
-            for page_url in relevant_pages:
-                if page_url == str(partner.website_url):
-                    # Already have main page content
-                    text = self._extract_text_content(main_content)
-                else:
-                    # Fetch additional page
-                    page_content = self._fetch_page_content(page_url)
-                    if page_content:
-                        text = self._extract_text_content(page_content)
-                    else:
-                        continue
-                
-                if text:
-                    all_text_content.append(text)
-            
-            if not all_text_content:
-                logger.warning(
-                    f"No text content extracted for {partner.entity_name} - "
-                    f"URL: {partner.website_url} - Marking as incomplete for manual review"
-                )
-                return PartnerEnrichment(
-                    decision_maker=None,
-                    contact_info=None,
-                    contact_channel=None,
-                    key_fact=None,
-                    verified_url=partner.website_url,
-                    status="incomplete"
-                )
-            
-            # Combine all text content
-            combined_text = "\n\n=== PAGE BREAK ===\n\n".join(all_text_content)
-            
-            # Extract information using LLM
-            extracted_info = self._extract_info_with_llm(combined_text, partner.entity_name)
-            
-            # Determine status
-            has_decision_maker = extracted_info.get("decision_maker") is not None
-            has_contact = extracted_info.get("contact_info") is not None
-            
-            status = "complete" if (has_decision_maker and has_contact) else "incomplete"
-            
-            enrichment = PartnerEnrichment(
-                decision_maker=extracted_info.get("decision_maker"),
-                contact_info=extracted_info.get("contact_info"),
-                contact_channel=extracted_info.get("contact_channel"),
-                key_fact=extracted_info.get("key_fact"),
-                verified_url=partner.website_url,
-                status=status
-            )
-            
-            if status == "incomplete":
-                logger.warning(
-                    f"Enrichment incomplete for {partner.entity_name} - "
-                    f"URL: {partner.website_url} - "
-                    f"decision_maker: {bool(enrichment.decision_maker)}, "
-                    f"contact_info: {bool(enrichment.contact_info)}, "
-                    f"contact_channel: {enrichment.contact_channel}, "
-                    f"key_fact: {bool(enrichment.key_fact)} - "
-                    f"Requires manual review"
-                )
-            else:
-                logger.info(
-                    f"Enrichment {status} for {partner.entity_name} - "
-                    f"decision_maker: {bool(enrichment.decision_maker)}, "
-                    f"contact_info: {bool(enrichment.contact_info)}, "
-                    f"contact_channel: {enrichment.contact_channel}, "
-                    f"key_fact: {bool(enrichment.key_fact)}"
-                )
-            
-            return enrichment
-            
-        except Exception as e:
-            logger.error(
-                f"Partner enrichment failed for {partner.entity_name} - "
-                f"URL: {partner.website_url} - "
-                f"Error: {str(e)} - "
-                f"Marking as incomplete for manual review",
-                exc_info=True
-            )
-            return PartnerEnrichment(
-                decision_maker=None,
-                contact_info=None,
-                contact_channel=None,
-                key_fact=None,
-                verified_url=partner.website_url,
-                status="incomplete"
-            )
-    
-    def enrich_partners_from_navigator(self, partner_profiles: List[PartnerProfile]) -> List[PartnerEnrichment]:
-        """
-        Enhance Navigator Agent enrichments with additional research and fallback data.
-        
-        This method provides additional enrichment on top of Navigator Agent's contact extraction,
-        focusing on filling gaps and providing fallback data when Navigator extraction is incomplete.
-        
-        Args:
-            navigator_enrichments: List of PartnerEnrichment objects from Navigator Agent
-            
-        Returns:
-            List of enhanced PartnerEnrichment objects
-        """
-        logger.info(f"Starting additional enrichment for {len(navigator_enrichments)} partners from Navigator Agent")
-        
-        enhanced_partners = []
-        
-        for enrichment in navigator_enrichments:
+        for profile in partner_profiles:
             try:
-                # If Navigator Agent already found complete information, use it as-is
-                if enrichment.status == "complete":
-                    logger.debug(f"Navigator provided complete data for {enrichment.verified_url}, using as-is")
-                    enhanced_partners.append(enrichment)
+                logger.info(f"Processing partner: {profile.org_name} (GUID: {profile.guid})")
+                url = profile.website_url
+
+                # Crawl all URLs and collect markdown content
+                all_page_markdowns = []
+                try:
+                    logger.debug(f"Crawling URL: {url}")
+
+                    # Run crawler asynchronously
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    try:
+                        crawler = ResearcherCrawler(max_pages=5)  # Limit pages per URL
+                        page_markdowns = loop.run_until_complete(crawler.start(url))
+                        all_page_markdowns.extend(page_markdowns)
+                        logger.debug(f"Crawled {len(page_markdowns)} pages from {url}")
+
+                    finally:
+                        loop.close()
+
+                except Exception as e:
+                    logger.error(f"Failed to crawl URL {url} for {profile.org_name}: {e}")
                     continue
                 
-                # For incomplete Navigator results, try to fill gaps with traditional scraping
-                logger.info(f"Navigator result incomplete for {enrichment.verified_url}, attempting additional enrichment")
+                logger.info(f"Collected {len(all_page_markdowns)} total pages for {profile.org_name}")
                 
-                # Create a temporary PartnerDiscovery object for legacy enrichment method
-                temp_partner = PartnerDiscovery(
-                    entity_name="Unknown",  # We don't have entity name from Navigator enrichment
-                    website_url=enrichment.verified_url,
-                    type="Unknown"
-                )
-                
-                # Use existing enrichment method as fallback
-                fallback_enrichment = self.enrich_partner(temp_partner)
-                
-                # Merge Navigator data with fallback data, prioritizing Navigator results
-                merged_enrichment = PartnerEnrichment(
-                    decision_maker=enrichment.decision_maker or fallback_enrichment.decision_maker,
-                    contact_info=enrichment.contact_info or fallback_enrichment.contact_info,
-                    contact_channel=enrichment.contact_channel or fallback_enrichment.contact_channel,
-                    key_fact=enrichment.key_fact or fallback_enrichment.key_fact,
-                    verified_url=enrichment.verified_url,
-                    status="complete" if (
-                        (enrichment.decision_maker or fallback_enrichment.decision_maker) and
-                        (enrichment.contact_info or fallback_enrichment.contact_info)
-                    ) else "incomplete"
-                )
-                
-                enhanced_partners.append(merged_enrichment)
-                
-                logger.debug(
-                    f"Enhanced enrichment for {enrichment.verified_url} - "
-                    f"Status: {merged_enrichment.status}"
-                )
+                # Process the markdown content to extract enrichment data
+                enrichment = self._process_markdown_content(profile, all_page_markdowns)
+                enrichments.append(enrichment)
                 
             except Exception as e:
-                logger.error(
-                    f"Failed to enhance Navigator enrichment for {enrichment.verified_url}: {e}",
-                    exc_info=True
+                logger.error(f"Failed to process partner {profile.org_name}: {e}", exc_info=True)
+                # Create incomplete enrichment as fallback
+                enrichment = PartnerEnrichment(
+                    decision_maker=None,
+                    contact_info=None,
+                    contact_channel=None,
+                    key_fact=f"Error processing: {str(e)[:100]}",
+                    verified_url=profile.internal_urls[0] if profile.internal_urls else "https://example.com",
+                    status="incomplete",
+                    all_contacts=None
                 )
-                # Return original Navigator enrichment on error
-                enhanced_partners.append(enrichment)
+                enrichments.append(enrichment)
         
-        successful_count = sum(1 for e in enhanced_partners if e.status == "complete")
-        logger.info(
-            f"Researcher enhancement complete: {len(enhanced_partners)} total, "
-            f"{successful_count} complete, {len(enhanced_partners) - successful_count} incomplete"
-        )
-        
-        return enhanced_partners
+        logger.info(f"Enrichment complete. Processed {len(enrichments)} partners")
+        return enrichments
     
-    def enrich_partners(self, partners: List[PartnerDiscovery]) -> List[PartnerEnrichment]:
+    def _process_markdown_content(self, profile: PartnerProfile, page_markdowns: List[PageMarkdown]) -> PartnerEnrichment:
         """
-        Enrich multiple partners with contact details and key facts.
-        
-        Skips failed websites and continues processing remaining partners.
-        All failures are logged for manual review.
+        Process crawled markdown content to extract enrichment data.
         
         Args:
-            partners: List of PartnerDiscovery objects from Scout Agent
+            profile: Original PartnerProfile
+            page_markdowns: List of PageMarkdown objects from crawling
             
         Returns:
-            List of PartnerEnrichment objects
+            PartnerEnrichment object with extracted data
         """
-        logger.info(f"Starting enrichment for {len(partners)} partners")
-        
-        enriched_partners = []
-        failed_urls = []
-        
-        for partner in partners:
-            try:
-                enrichment = self.enrich_partner(partner)
-                enriched_partners.append(enrichment)
-                
-                # Track failed URLs for summary logging
-                if enrichment.status == "incomplete":
-                    failed_urls.append(str(partner.website_url))
-                    
-            except Exception as e:
-                # Catch any unexpected errors and continue to next partner
-                logger.error(
-                    f"Unexpected error enriching {partner.entity_name} - "
-                    f"URL: {partner.website_url} - "
-                    f"Error: {str(e)} - "
-                    f"Skipping and continuing to next partner",
-                    exc_info=True
-                )
-                failed_urls.append(str(partner.website_url))
-                
-                # Still add incomplete enrichment to results
-                enriched_partners.append(PartnerEnrichment(
+        try:
+            # Combine all markdown content for analysis
+            combined_content = ""
+            for page in page_markdowns:
+                combined_content += f"\n\n--- Page: {page.page_url} ---\n"
+                combined_content += page.markdown_content
+            
+            if not combined_content.strip():
+                logger.warning(f"No content extracted for {profile.org_name}")
+                return PartnerEnrichment(
                     decision_maker=None,
                     contact_info=None,
                     contact_channel=None,
                     key_fact=None,
-                    verified_url=partner.website_url,
-                    status="incomplete"
-                ))
+                    verified_url=profile.internal_urls[0] if profile.internal_urls else "https://example.com",
+                    status="incomplete",
+                    all_contacts=None
+                )
+            
+            # Use Gemini to extract structured data from markdown content
+            prompt = f"""
+            Analyze the following website content for the organization "{profile.org_name}" and extract:
+
+            1. Decision maker name (CEO, Director, Principal, Manager, etc.)
+            2. Best contact information (email or phone number)
+            3. Preferred contact channel (WhatsApp, Email, Messenger, Instagram, PhoneNo, Others)
+            4. One key fact for personalization (awards, achievements, specialties, branches, motto, etc.)
+
+            Website Content:
+            {combined_content[:8000]}  # Limit content to avoid token limits
+
+            Respond in this exact JSON format:
+            {{
+                "decision_maker": "Name or null",
+                "contact_info": "email@example.com or phone number or null",
+                "contact_channel": "WhatsApp|Email|Messenger|Instagram|PhoneNo|Others or null",
+                "key_fact": "One interesting fact or null"
+            }}
+            """
+            
+            try:
+                response = self.model.generate_content(prompt)
+                
+                if response and response.text:
+                    # Parse the JSON response
+                    import json
+                    extracted_data = json.loads(response.text.strip())
+                    
+                    # Determine status based on extracted data
+                    status = "complete" if (
+                        extracted_data.get("decision_maker") and 
+                        extracted_data.get("contact_info")
+                    ) else "incomplete"
+                    
+                    # Get verified URL (prefer internal URLs)
+                    verified_url = (
+                        profile.internal_urls[0] if profile.internal_urls 
+                        else profile.external_urls[0] if profile.external_urls 
+                        else "https://example.com"
+                    )
+                    
+                    enrichment = PartnerEnrichment(
+                        decision_maker=extracted_data.get("decision_maker"),
+                        contact_info=extracted_data.get("contact_info"),
+                        contact_channel=extracted_data.get("contact_channel"),
+                        key_fact=extracted_data.get("key_fact"),
+                        verified_url=verified_url,
+                        status=status,
+                        all_contacts=None  # Could be populated with detailed contact extraction
+                    )
+                    
+                    logger.info(f"Successfully enriched {profile.org_name} - status: {status}")
+                    return enrichment
+                    
+                else:
+                    logger.warning(f"Empty response from Gemini for {profile.org_name}")
+                    
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse Gemini response for {profile.org_name}: {e}")
+            except Exception as e:
+                logger.error(f"Gemini API error for {profile.org_name}: {e}")
+            
+        except Exception as e:
+            logger.error(f"Error processing markdown content for {profile.org_name}: {e}")
         
-        # Log summary
-        complete_count = sum(1 for p in enriched_partners if p.status == "complete")
-        incomplete_count = len(enriched_partners) - complete_count
-        
-        logger.info(
-            f"Enrichment complete: {complete_count} complete, {incomplete_count} incomplete "
-            f"out of {len(partners)} total partners"
+        # Fallback enrichment
+        verified_url = (
+            profile.internal_urls[0] if profile.internal_urls 
+            else profile.external_urls[0] if profile.external_urls 
+            else "https://example.com"
         )
         
-        # Log failed URLs for manual review
-        if failed_urls:
-            logger.warning(
-                f"Failed URLs requiring manual review ({len(failed_urls)}): "
-                f"{', '.join(failed_urls)}"
-            )
-        
-        return enriched_partners
+        return PartnerEnrichment(
+            decision_maker=None,
+            contact_info=profile.primary_contact,  # Use existing contact if available
+            contact_channel="PhoneNo" if profile.primary_contact else None,
+            key_fact=f"Organization type: {profile.entity_type}",
+            verified_url=verified_url,
+            status="incomplete",
+            all_contacts=None
+        )
+
+
+
