@@ -94,7 +94,8 @@ class NavigatorAgent:
                     return await self.navigate_and_extract(
                         lead_guid = data.guid,
                         website_url=data.website_url,
-                        entity_name=data.org_name or f"Partner_{index}"
+                        entity_name=data.org_name or f"Partner_{index}",
+                        primary_contact = data.primary_contact
                     )
                 except Exception as e:
                     logger.error(f"Failed to process partner {index} ({data.org_name}): {e}")
@@ -121,7 +122,8 @@ class NavigatorAgent:
         self,
         lead_guid: str,
         website_url: str, 
-        entity_name: str
+        entity_name: str,
+        primary_contact: str
     ) -> List[PartnerContact]:
         """
         Process single partner with V2 crawling and extraction.
@@ -142,7 +144,7 @@ class NavigatorAgent:
         logger.info(f"V2 processing {entity_name} at {website_url}")
         
         try:
-            structured_contacts = await self.crawler.start(lead_guid, website_url)
+            structured_contacts = await self.crawler.start(lead_guid, website_url, primary_contact)
             duration = asyncio.get_event_loop().time() - start_time
             logger.info(
                 f"V2 processing completed for {entity_name} in {duration:.2f}s - "
