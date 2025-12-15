@@ -215,6 +215,20 @@ class PageMarkdown(BaseModel):
     markdown_content: str = Field(..., description="Extracted content in markdown format")
 
 
+class PageKeyFact(PageMarkdown):
+    """
+    Extended page data with extracted key facts.
+    
+    Inherits from PageMarkdown and adds key facts extraction.
+    
+    Attributes:
+        page_url: URL of the crawled page (inherited)
+        markdown_content: Extracted content in markdown format (inherited)
+        key_facts: List of extracted key facts from the page content
+    """
+    key_facts: List[str] = Field(..., description="List of extracted key facts from the page content")
+
+
 class ScrapedBusinessData(BaseModel):
     """
     Raw data extracted from Google Maps business card.
