@@ -18,7 +18,7 @@ class NavigatorCrawler:
             page = await browser.new_page()
 
             # Initial crawl
-            await self.crawl(page, url, lead_guid)
+            await self.crawl(page, url, lead_guid, primary_contact)
 
             # Process subpages recursively
             while self.subpages_queue:

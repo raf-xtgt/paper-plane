@@ -117,14 +117,27 @@ class OutreachDraft(BaseModel):
 
 # Kafka Message Models
 
-class PartnerProfile(BaseModel):
+class ScrapedBusinessData(BaseModel):
     """
-    Partner profile data for Kafka message, adhering to the new schema.
+    Raw data extracted from Google Maps business card.
     """
     guid: str = Field(
         default_factory=lambda: str(uuid.uuid4()),
-        description="Unique identifier (UUID)"
+        description="Unique identifier"
     )
+    org_name: Optional[str] = Field(None, description="Organization name")
+    primary_contact: Optional[str] = Field(None, description="Phone number")
+    review_score: Optional[str] = Field(None, description="Review score")
+    total_reviews: Optional[str] = Field(None, description="Total review count")
+    website_url: Optional[str] = Field(None, description="Website URL")
+    address: Optional[str] = Field(None, description="Physical address")
+
+
+class PartnerProfile(ScrapedBusinessData):
+    """
+    Partner profile data for Kafka message, inheriting from ScrapedBusinessData.
+    Extends the base scraped data with additional contact information and URLs.
+    """
     emails: Optional[List[str]] = Field(
         None, description="List of email addresses found"
     )
@@ -137,14 +150,8 @@ class PartnerProfile(BaseModel):
     external_urls: Optional[List[str]] = Field(
         None, description="List of external URLs discovered"
     )
-    org_name: str = Field(
-        ..., description="Partner organization name"
-    )
-    primary_contact: Optional[str] = Field(
-        None, description="Primary contact information (e.g., name or phone/email)"
-    )
-    entity_type: str = Field(
-        ..., description="Type of partner entity (e.g., 'vendor', 'client')"
+    entity_type: Optional[str] = Field(
+        None, description="Type of partner entity (e.g., 'vendor', 'client')"
     )
     lead_phase: Optional[str] = Field(
         None, description="Current phase in the lead pipeline (e.g., 'new', 'contacted')"
@@ -229,17 +236,3 @@ class PageKeyFact(PageMarkdown):
     key_facts: List[str] = Field(..., description="List of extracted key facts from the page content")
 
 
-class ScrapedBusinessData(BaseModel):
-    """
-    Raw data extracted from Google Maps business card.
-    """
-    guid: str = Field(
-        default_factory=lambda: str(uuid.uuid4()),
-        description="Unique identifier"
-    )
-    org_name: Optional[str] = Field(None, description="Organization name")
-    primary_contact: Optional[str] = Field(None, description="Phone number")
-    review_score: Optional[str] = Field(None, description="Review score")
-    total_reviews: Optional[str] = Field(None, description="Total review count")
-    website_url: Optional[str] = Field(None, description="Website URL")
-    address: Optional[str] = Field(None, description="Physical address")

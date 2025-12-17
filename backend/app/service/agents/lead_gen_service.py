@@ -9,10 +9,11 @@ The pipeline executes asynchronously with timeout handling and comprehensive log
 import os
 import logging
 import asyncio
+from typing import Optional
 from datetime import datetime
 from app.service.agents.scout.scout_agent import ScoutAgent
 from app.service.agents.navigator.navigator_agent import NavigatorAgent
-from app.service.agents.researcher_agent import ResearcherAgent
+from app.service.agents.researcher.researcher_agent import ResearcherAgent
 from app.service.agents.strategist_agent import StrategistAgent
 from app.util.confluent.lead_gen_producer import LeadGenProducer
 from app.model.lead_gen_model import (
@@ -59,7 +60,7 @@ class LeadGenPipeline:
         self.lead_producer = LeadGenProducer()
         
         # Load configuration
-        self.pipeline_timeout = int(os.getenv("LEAD_GEN_TIMEOUT", "300"))  # 5 minutes default
+        self.pipeline_timeout = int(os.getenv("LEAD_GEN_TIMEOUT", "600"))  # 5 minutes default
         
         logger.info(
             f"Pipeline initialized - timeout: {self.pipeline_timeout}s, "
@@ -122,12 +123,13 @@ class LeadGenPipeline:
             LeadObject ready for Kafka publishing
         """
         partner_profile = PartnerProfile(
-            name=discovery.entity_name,
-            url=enrichment.verified_url,
-            contact_person=enrichment.decision_maker,
-            contact_method=enrichment.contact_info,
-            contact_channel=enrichment.contact_channel,
-            entity_type=discovery.type
+            org_name=discovery.entity_name,
+            website_url=enrichment.verified_url,
+            primary_contact=enrichment.decision_maker,
+            entity_type=discovery.type,
+            # Additional fields that might be available from enrichment
+            emails=[enrichment.contact_info] if enrichment.contact_info and "@" in enrichment.contact_info else None,
+            phone_numbers=[enrichment.contact_info] if enrichment.contact_info and not "@" in enrichment.contact_info else None
         )
         
         ai_context = AIContext(
@@ -216,78 +218,127 @@ class LeadGenPipeline:
             #     logger.warning("No partners with valid website URLs found after validation")
             #     return []
             
-            valid_scraped_data = [
-                    ScrapedBusinessData(
-                        guid="25fea789-55f1-43b6-8a1a-7451ad233d28",
-                        org_name="UIC Medical Centre - Dr. Saurabh Patel",
-                        primary_contact="+1 973-344-2929",
-                        review_score="৪.২",
-                        total_reviews="৮০",
-                        website_url="https://uicmedcentre.com/",
-                        address="99 Madison St",
-                    ),
-                    ScrapedBusinessData(
-                        guid="59fa8bf0-6ce5-4779-ad02-ddc387285561",
-                        org_name="Newark Imaging Open MRI",
-                        primary_contact="+1 973-589-7777",
-                        review_score="৪.৭",
-                        total_reviews="৮৭",
-                        website_url="http://www.newarkimaging.com/",
-                        address="400 Delancy St Suite 108",
-                    )
-                ]
-            # print("valid_scraped_data")
-            # print(valid_scraped_data)
+            valid_scraped_data  = [
+                # ScrapedBusinessData(
+                #     guid='043cd6bc-21ca-49c7-a068-34e301119b8b',
+                #     org_name='Optimum Diagnostic Imaging',
+                #     primary_contact='+1 973-521-5685',
+                #     review_score='৪.৪',
+                #     total_reviews='৯১',
+                #     website_url='https://odinj.com/',
+                #     address='243 Chestnut St'
+                # ),
+                # ScrapedBusinessData(
+                #     guid='63d07ba8-e0b7-4e03-b020-c667289480e1',
+                #     org_name='Newark Imaging Open MRI',
+                #     primary_contact='+1 973-589-7777',
+                #     review_score='৪.৭',
+                #     total_reviews='৮৭',
+                #     website_url='http://www.newarkimaging.com/',
+                #     address='400 Delancy St Suite 108'
+                # ),
+                ScrapedBusinessData(
+                    guid='8f6a2fd4-0f83-4429-9f2e-4b39b72f1dc1',
+                    org_name='UIC Medical Centre - Dr. Saurabh Patel',
+                    primary_contact='+1 973-344-2929',
+                    review_score='৪.২',
+                    total_reviews='৮০',
+                    website_url='https://uicmedcentre.com/',
+                    address='99 Madison St'
+                ),
+                # ScrapedBusinessData(
+                #     guid='98065337-e837-4813-af60-47229e37a8e4',
+                #     org_name="Children's Specialized Hospital Center – Newark",
+                #     primary_contact='+1 888-244-5373',
+                #     review_score='৪.৮',
+                #     total_reviews='৪৩',
+                #     website_url='https://www.rwjbh.org/our-locations/pediatric-outpatient-facilities/childrens-specialized-outpatient-center-at-newar/',
+                #     address='182 Lyons Ave'
+                # )
+            ]
+            print("valid_scraped_data")
+            print(valid_scraped_data)
 
             # Run Navigator Agent (async) - use validated scraped_data from Scout
-            partner_contacts = await self.navigator.navigate_and_extract_batch(valid_scraped_data)
+            # partner_contacts = await self.navigator.navigate_and_extract_batch(valid_scraped_data)
             
             navigator_duration = (datetime.utcnow() - navigator_start).total_seconds()
 
             print("partner_contacts")
-            print(partner_contacts)
+            # print(partner_contacts)
 
             # Step 3: Researcher Agent - Enhance Navigator enrichments with additional details
-            logger.info(f"Step 3/4: Researcher Agent - Enhancing {len(partner_contacts)} Navigator enrichments")
-            partner_profiles = self.consolidate_partner_data(partner_contacts)
+            # logger.info(f"Step 3/4: Researcher Agent - Enhancing {len(partner_contacts)} Navigator enrichments")
+            # partner_profiles = self.consolidate_partner_data(partner_contacts, valid_scraped_data)
+            partner_profiles: List[PartnerProfile] = [
+                PartnerProfile(
+                    guid='8f6a2fd4-0f83-4429-9f2e-4b39b72f1dc1',
+                    org_name='UIC Medical Centre - Dr. Saurabh Patel',
+                    primary_contact='+1 973-344-2929',
+                    review_score='৪.২',
+                    total_reviews='৮০',
+                    website_url='https://uicmedcentre.com/',
+                    address='99 Madison St',
+                    emails=['needhelp@gmail.com', 'info@gmail.com'],
+                    phone_numbers=[
+                        '(173) 219-3874', '(360) 327-6556', '(175) 095-8426',
+                        '(447) 917-3040', '(176) 002-6547', '(173) 479-4092',
+                        '(176) 002-6464', '(593) 861-7689', '(949) 857-3652',
+                        '(176) 003-1715', '(684) 312-7335', '(174) 644-9509',
+                        '(175) 975-8655', '(169) 117-8163', '(174) 399-8931',
+                        '(945) 771-6465', '(100) 804-3490', '(172) 771-4275',
+                        '(365) 343-1696', '(172) 927-2122', '(537) 166-6455',
+                        '(174) 613-0462', '(171) 381-7949', '(176) 001-7303',
+                        '(171) 405-5514', '(174) 341-2984', '(813) 763-4563',
+                        '(095) 443-6142', '(217) 946-5330', '(973) 344-2929',
+                        '(914) 138-6395', '(896) 708-5614', '(175) 345-4859',
+                        '(171) 381-7617', '(221) 603-9277', '(521) 203-4282',
+                        '(174) 776-2308', '(176) 002-6557', '(809) 642-7346',
+                        '(361) 817-5920', '(000) 000-0006', '(179) 277-2137',
+                        '(172) 125-0674', '(173) 075-9904', '(943) 578-1033'
+                    ],
+                    internal_urls=[
+                        'https://uicmedcentre.com/about-us/',
+                        'https://uicmedcentre.com/',
+                        'https://uicmedcentre.com/contact-us/'
+                    ],
+                    external_urls=[
+                        'https://uicmedcentre.com/about-us/',
+                        'https://uicmedcentre.com/',
+                        'https://uicmedcentre.com/contact-us/',
+                        'https://www.facebook.com/UICmedical/',
+                        'https://www.instagram.com/uicmedcentre/'
+                    ],
+                    entity_type='Medical Facility',
+                    lead_phase='new'
+                )
+            ]
 
-        #     researcher_start = datetime.utcnow()
+            print("partner_profiles")
+            print(partner_profiles)
+
+            # Researcher Agent: extract key facts from : markdown from content in internal url + markdown from content in external url
+            # Strategist Agent: generate outreach template on three channels: phone, external and internal.
+            researcher_start = datetime.utcnow()
+
+            if not partner_profiles:
+                logger.warning("Navigator Agent returned no partner profiles")
+                return []
+
+            # Run Researcher in executor - pass validated Navigator enrichments for enhancement
+            loop = asyncio.get_event_loop()
+            final_enrichments = await loop.run_in_executor(
+                None,
+                self.researcher.enrich_partners_from_navigator,
+                partner_profiles
+            )
             
-        #     # Validate Navigator enrichments before passing to Researcher Agent
-        #     if not navigator_enrichments:
-        #         logger.warning("Navigator Agent returned no enrichments")
-        #         return []
-            
-        #     # Ensure all Navigator enrichments have valid URLs
-        #     valid_navigator_enrichments = [
-        #         e for e in navigator_enrichments 
-        #         if e.verified_url and str(e.verified_url).startswith(('http://', 'https://'))
-        #     ]
-            
-        #     if len(valid_navigator_enrichments) != len(navigator_enrichments):
-        #         logger.warning(
-        #             f"Filtered out {len(navigator_enrichments) - len(valid_navigator_enrichments)} "
-        #             f"Navigator enrichments with invalid URLs"
-        #         )
-            
-        #     if not valid_navigator_enrichments:
-        #         logger.warning("No valid Navigator enrichments found after validation")
-        #         return []
-            
-        #     # Run Researcher in executor - pass validated Navigator enrichments for enhancement
-        #     loop = asyncio.get_event_loop()
-        #     final_enrichments = await loop.run_in_executor(
-        #         None,
-        #         self.researcher.enrich_partners_from_navigator,
-        #         valid_navigator_enrichments
-        #     )
-            
-        #     researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
-        #     complete_count = sum(1 for e in final_enrichments if e.status == "complete")
-        #     logger.info(
-        #         f"Researcher Agent complete - {complete_count}/{len(final_enrichments)} complete "
-        #         f"in {researcher_duration:.2f}s"
-        #     )
+            researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
+            complete_count = sum(1 for e in final_enrichments if e.status == "complete")
+            logger.info(
+                f"Researcher Agent complete - {complete_count}/{len(final_enrichments)} complete "
+                f"in {researcher_duration:.2f}s"
+            )
             
         #     # Step 4: Strategist Agent - Draft messages
         #     logger.info(f"Step 4/4: Strategist Agent - Drafting messages for {len(final_enrichments)} partners")
@@ -506,19 +557,30 @@ class LeadGenPipeline:
             )
 
 
-    def consolidate_partner_data(self, contact_list: List[PartnerContact]) -> List[PartnerProfile]:
+    def consolidate_partner_data(
+        self, 
+        contact_list: List[PartnerContact], 
+        scraped_data_list: List[ScrapedBusinessData]
+    ) -> List[PartnerProfile]:
         """
         Groups contact data by lead_guid, extracts unique contact info, and categorizes URLs
         into internal and external lists for consolidation into PartnerProfile objects.
+        Populates inherited ScrapedBusinessData fields based on matching GUIDs.
 
         Args:
             contact_list: A list of PartnerContact objects.
+            scraped_data_list: A list of ScrapedBusinessData objects to inherit from.
 
         Returns:
-            A list of partially filled PartnerProfile objects, one for each unique lead_guid.
+            A list of PartnerProfile objects with inherited ScrapedBusinessData fields.
         """
 
-        # 1. Grouping mechanism: Use defaultdict to map lead_guid to a dictionary
+        # 1. Create a lookup dictionary for ScrapedBusinessData by GUID
+        scraped_data_lookup: Dict[str, ScrapedBusinessData] = {
+            data.guid: data for data in scraped_data_list
+        }
+
+        # 2. Grouping mechanism: Use defaultdict to map lead_guid to a dictionary
         #    that holds sets for automatic deduplication.
         grouped_data: Dict[str, Dict[str, Set[str]]] = defaultdict(lambda: {
             'emails': set(),
@@ -530,7 +592,7 @@ class LeadGenPipeline:
         # Define social media names for categorization
         SOCIAL_MEDIA = {'Facebook', 'Instagram', 'Twitter', 'LinkedIn'}
 
-        # 2. Process and categorize each contact record
+        # 3. Process and categorize each contact record
         for contact in contact_list:
             guid = contact.lead_guid
             data_sets = grouped_data[guid] # Get the sets for this lead_guid
@@ -551,24 +613,70 @@ class LeadGenPipeline:
                 # Internal URL (or non-social media external link)
                 data_sets['internal_urls'].add(contact.url)
 
-        # 3. Create the final list of PartnerProfile objects
+        # 4. Create the final list of PartnerProfile objects
         final_profiles: List[PartnerProfile] = []
 
         for lead_guid, aggregated_data in grouped_data.items():
-            # Note: We are creating a partial PartnerProfile here.
-            # Required fields like 'org_name' and 'entity_type' are left as placeholder
-            # strings since the input data doesn't provide them.
-
-            profile = PartnerProfile(
-                guid=lead_guid,
-                emails=list(aggregated_data['emails']) or None,
-                phone_numbers=list(aggregated_data['phone_numbers']) or None,
-                internal_urls=list(aggregated_data['internal_urls']) or None,
-                external_urls=list(aggregated_data['external_urls']) or None,
-                # Placeholder values for required fields not in input list
-                org_name="UIC Medical Centre (Placeholder)",
-                entity_type="Medical/Clinic (Placeholder)"
-            )
+            # Get the corresponding ScrapedBusinessData for this GUID
+            scraped_data = scraped_data_lookup.get(lead_guid)
+            
+            if scraped_data:
+                # Create PartnerProfile inheriting from ScrapedBusinessData
+                profile = PartnerProfile(
+                    # Inherited fields from ScrapedBusinessData
+                    guid=scraped_data.guid,
+                    org_name=scraped_data.org_name,
+                    primary_contact=scraped_data.primary_contact,
+                    review_score=scraped_data.review_score,
+                    total_reviews=scraped_data.total_reviews,
+                    website_url=scraped_data.website_url,
+                    address=scraped_data.address,
+                    # Additional PartnerProfile fields
+                    emails=list(aggregated_data['emails']) or None,
+                    phone_numbers=list(aggregated_data['phone_numbers']) or None,
+                    internal_urls=list(aggregated_data['internal_urls']) or None,
+                    external_urls=list(aggregated_data['external_urls']) or None,
+                    entity_type=self._determine_entity_type(scraped_data.org_name),
+                    lead_phase="new"  # Default phase for new leads
+                )
+            else:
+                # Fallback if no matching ScrapedBusinessData found
+                logger.warning(f"No ScrapedBusinessData found for GUID: {lead_guid}")
+                profile = PartnerProfile(
+                    guid=lead_guid,
+                    org_name="Unknown Organization",
+                    emails=list(aggregated_data['emails']) or None,
+                    phone_numbers=list(aggregated_data['phone_numbers']) or None,
+                    internal_urls=list(aggregated_data['internal_urls']) or None,
+                    external_urls=list(aggregated_data['external_urls']) or None,
+                    entity_type="Unknown",
+                    lead_phase="new"
+                )
+            
             final_profiles.append(profile)
 
         return final_profiles
+
+    def _determine_entity_type(self, org_name: Optional[str]) -> str:
+        """
+        Determine entity type based on organization name.
+        
+        Args:
+            org_name: Organization name to analyze
+            
+        Returns:
+            Entity type classification
+        """
+        if not org_name:
+            return "Unknown"
+            
+        name_lower = org_name.lower()
+        
+        if any(keyword in name_lower for keyword in ["school", "college", "university", "academy"]):
+            return "Educational Institution"
+        elif any(keyword in name_lower for keyword in ["hospital", "clinic", "medical", "diagnostic", "health"]):
+            return "Medical Facility"
+        elif any(keyword in name_lower for keyword in ["coaching", "training", "institute", "center"]):
+            return "Training Center"
+        else:
+            return "Business"

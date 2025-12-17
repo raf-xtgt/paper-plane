@@ -58,7 +58,7 @@ class ResearcherAgent:
         logger.info(f"Researcher Agent initialized with model: {self.model_name}, timeout: {self.timeout}s")
 
     
-    def enrich_partners_from_navigator(self, partner_profiles: List[ScrapedBusinessData]) -> List[PartnerEnrichment]:
+    def enrich_partners_from_navigator(self, partner_profiles: List[PartnerProfile]) -> List[PartnerEnrichment]:
         """
         Enrich partner profiles by crawling their internal and external URLs.
         
@@ -99,31 +99,23 @@ class ResearcherAgent:
                 #     logger.error(f"Failed to crawl URL {url} for {profile.org_name}: {e}")
                 #     continue
 
-                all_page_markdowns = sample_markdown_data
+                # all_page_markdowns = sample_markdown_data
                 logger.info(f"Collected {len(all_page_markdowns)} total pages for {profile.org_name}")
                 
                 # Process the markdown content to extract enrichment data
-                enrichment = self._process_markdown_content(profile, all_page_markdowns)
-                enrichments.append(enrichment)
+                all_page_markdowns=sample_markdown_data
+                page_key_facts = self._extract_key_facts_from_markdown(profile, all_page_markdowns)
+
                 
             except Exception as e:
                 logger.error(f"Failed to process partner {profile.org_name}: {e}", exc_info=True)
                 # Create incomplete enrichment as fallback
-                enrichment = PartnerEnrichment(
-                    decision_maker=None,
-                    contact_info=None,
-                    contact_channel=None,
-                    key_fact=f"Error processing: {str(e)[:100]}",
-                    verified_url=profile.website_url if profile.website_url else "https://example.com",
-                    status="incomplete",
-                    all_contacts=None
-                )
-                enrichments.append(enrichment)
+
         
         logger.info(f"Enrichment complete. Processed {len(enrichments)} partners")
         return enrichments
     
-    def _process_markdown_content(self, profile: ScrapedBusinessData, page_markdowns: List[PageMarkdown]) -> PartnerEnrichment:
+    def _extract_key_facts_from_markdown(self, profile: ScrapedBusinessData, page_markdowns: List[PageMarkdown]) -> List[PageKeyFact]:
         """
         Process crawled markdown content to extract enrichment data and key facts.
         
@@ -162,42 +154,9 @@ class ResearcherAgent:
                 except Exception as e:
                     logger.error(f"Error processing page {page_markdown.page_url}: {e}")
                     continue
-            
-            # Combine all content for comprehensive analysis
-            combined_content = ""
-            all_key_facts = []
-            
-            for page_fact in page_key_facts:
-                combined_content += f"\n\n--- Page: {page_fact.page_url} ---\n"
-                combined_content += page_fact.markdown_content[:2000]  # Limit per page
-                all_key_facts.extend(page_fact.key_facts)
-            
-            if not combined_content.strip():
-                logger.warning(f"No content extracted for {profile.org_name}")
-                return self._create_fallback_enrichment(profile)
-            
-            # Extract comprehensive enrichment data using LLM
-            enrichment_data = self._extract_enrichment_data(combined_content, profile.org_name, all_key_facts)
-            
-            # Determine status based on extracted data
-            status = "complete" if (
-                enrichment_data.get("decision_maker") and 
-                enrichment_data.get("contact_info")
-            ) else "incomplete"
-            
-            # Create enrichment object
-            enrichment = PartnerEnrichment(
-                decision_maker=enrichment_data.get("decision_maker"),
-                contact_info=enrichment_data.get("contact_info") or profile.primary_contact,
-                contact_channel=enrichment_data.get("contact_channel"),
-                key_fact=enrichment_data.get("key_fact"),
-                verified_url=profile.website_url if profile.website_url else "https://example.com",
-                status=status,
-                all_contacts=None  # Could be populated with detailed contact extraction
-            )
-            
-            logger.info(f"Successfully processed {profile.org_name} - status: {status}, key_facts: {len(all_key_facts)}")
-            return enrichment
+
+            logger.info(f"Successfully processed {profile.org_name} - url: {profile.website_url}, key_facts: {len(page_key_facts)}")
+            return page_key_facts
             
         except Exception as e:
             logger.error(f"Error processing markdown content for {profile.org_name}: {e}")
