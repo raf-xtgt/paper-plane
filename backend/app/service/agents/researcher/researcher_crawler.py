@@ -78,7 +78,7 @@ class ResearcherCrawler:
 
         try:
             # Navigate to the page and wait for it to load
-            await page.goto(url, wait_until="networkidle", timeout=30000)
+            await page.goto(url, wait_until="networkidle", timeout=90000)
             
             # Handle dynamic content
             await self._handle_dynamic_content(page)

@@ -10,6 +10,7 @@ import os
 import logging
 import asyncio
 import json
+from app.service.agents.researcher.all_markdowns import sample_markdown_data
 from typing import List
 import google.generativeai as genai
 from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, PartnerProfile, PageMarkdown, \
@@ -78,26 +79,27 @@ class ResearcherAgent:
 
                 # Crawl all URLs and collect markdown content
                 all_page_markdowns = []
-                try:
-                    logger.debug(f"Crawling URL: {url}")
+                # try:
+                #     logger.debug(f"Crawling URL: {url}")
+                #
+                #     # Run crawler asynchronously
+                #     loop = asyncio.new_event_loop()
+                #     asyncio.set_event_loop(loop)
+                #
+                #     try:
+                #         crawler = ResearcherCrawler(max_pages=5)  # Limit pages per URL
+                #         page_markdowns = loop.run_until_complete(crawler.start(url))
+                #         all_page_markdowns.extend(page_markdowns)
+                #         logger.debug(f"Crawled {len(page_markdowns)} pages from {url}")
+                #
+                #     finally:
+                #         loop.close()
+                #
+                # except Exception as e:
+                #     logger.error(f"Failed to crawl URL {url} for {profile.org_name}: {e}")
+                #     continue
 
-                    # Run crawler asynchronously
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-
-                    try:
-                        crawler = ResearcherCrawler(max_pages=5)  # Limit pages per URL
-                        page_markdowns = loop.run_until_complete(crawler.start(url))
-                        all_page_markdowns.extend(page_markdowns)
-                        logger.debug(f"Crawled {len(page_markdowns)} pages from {url}")
-
-                    finally:
-                        loop.close()
-
-                except Exception as e:
-                    logger.error(f"Failed to crawl URL {url} for {profile.org_name}: {e}")
-                    continue
-                
+                all_page_markdowns = sample_markdown_data
                 logger.info(f"Collected {len(all_page_markdowns)} total pages for {profile.org_name}")
                 
                 # Process the markdown content to extract enrichment data
@@ -245,20 +247,25 @@ class ResearcherAgent:
             response = self.model.generate_content(prompt+output_format)
             
             if response and response.text:
-                import json
                 try:
-                    key_facts = json.loads(response.text.strip())
+                    # Extract JSON from the response text
+                    response_text = response.text.strip().replace("```json", "").replace("```", "")
+                    # Parse JSON and extract key_facts
+                    parsed_data = json.loads(response_text)
+                    key_facts = parsed_data.get("key_facts", [])
                     
-                    # Validate response format
-                    if isinstance(key_facts, list) and len(key_facts) <= 3:
-                        # Filter out empty or very short facts
-                        valid_facts = [fact for fact in key_facts if isinstance(fact, str) and len(fact.strip()) > 10]
-                        logger.debug(f"Extracted {len(valid_facts)} key facts from {page_markdown.page_url}")
-                        return valid_facts[:3]  # Ensure max 3 facts
-                    
+                    if isinstance(key_facts, list):
+                        logger.debug(f"Extracted {len(key_facts)} key facts from {page_markdown.page_url}")
+                        return key_facts
+                    else:
+                        logger.warning(f"key_facts is not a list for {page_markdown.page_url}")
+                        return []
+                        
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse key facts JSON for {page_markdown.page_url}: {e}")
-                    
+                    logger.error(f"Failed to parse key facts JSON from {page_markdown.page_url}: {e}")
+                    logger.debug(f"Raw response: {response.text}")
+                    return []
+            
         except Exception as e:
             logger.error(f"Error extracting key facts from {page_markdown.page_url}: {e}")
         
@@ -306,14 +313,32 @@ class ResearcherAgent:
             response = self.model.generate_content(prompt)
             
             if response and response.text:
-                import json
                 try:
-                    enrichment_data = json.loads(response.text.strip())
+                    # Extract JSON from markdown code blocks if present
+                    response_text = response.text.strip()
+                    
+                    # Check if response is wrapped in markdown code blocks
+                    if "```json" in response_text and "```" in response_text:
+                        # Extract content between ```json and ```
+                        start_marker = "```json"
+                        end_marker = "```"
+                        start_idx = response_text.find(start_marker) + len(start_marker)
+                        end_idx = response_text.find(end_marker, start_idx)
+                        
+                        if start_idx > len(start_marker) - 1 and end_idx > start_idx:
+                            json_content = response_text[start_idx:end_idx].strip()
+                        else:
+                            json_content = response_text
+                    else:
+                        json_content = response_text
+                    
+                    enrichment_data = json.loads(json_content)
                     logger.debug(f"Successfully extracted enrichment data for {org_name}")
                     return enrichment_data
                     
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse enrichment JSON for {org_name}: {e}")
+                    logger.debug(f"Raw response: {response.text}")
                     
         except Exception as e:
             logger.error(f"Error extracting enrichment data for {org_name}: {e}")
