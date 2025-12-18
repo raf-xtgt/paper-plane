@@ -10,14 +10,12 @@ import os
 import logging
 import json
 from typing import Optional, List
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, OutreachDraft, PartnerProfile, PageKeyFact
 
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.strategist")
-
-# Configure Gemini API
-genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 
 class StrategistAgent:
@@ -30,22 +28,26 @@ class StrategistAgent:
     """
     
     def __init__(self):
-        """Initialize Strategist Agent with Gemini Pro model."""
-        self.model_name = os.getenv("ADK_MODEL_PRO", "gemini-2.0-pro-exp")
+        """Initialize Strategist Agent with Vertex AI Gemini Pro model."""
+        self.model_name = os.getenv("ADK_MODEL_PRO", "gemini-2.0-flash-exp")
         self.temperature = 0.7
         
-        # Initialize Gemini model
-        self.model = genai.GenerativeModel(
-            model_name=self.model_name,
-            generation_config={
-                "temperature": self.temperature,
-                "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": 512,
-            }
+        # Initialize Vertex AI Gemini model
+        self.model = GenerativeModel(
+            model_name=self.model_name
         )
         
-        logger.info(f"Strategist Agent initialized with model: {self.model_name}")
+        # Configure generation parameters
+        self.generation_config = GenerationConfig(
+            temperature=self.temperature,
+            top_p=0.95,
+            top_k=40,
+            max_output_tokens=2048,
+            response_mime_type="application/json",
+            response_schema=OutreachDraft.model_json_schema()
+        )
+        
+        logger.info(f"Strategist Agent initialized with Vertex AI model: {self.model_name}")
     
     def _get_system_prompt(self, market: str) -> str:
         """
@@ -75,11 +77,6 @@ class StrategistAgent:
             - Show genuine interest in partnership
             - Use conversational language (contractions are fine)
             - Avoid overly formal business jargon
-            
-            Return ONLY a JSON object with this exact structure:
-            {{
-                "draft_message": "Your message here"
-            }}
             
             The message should be ready to send via WhatsApp without any modifications.
             """
@@ -190,22 +187,19 @@ class StrategistAgent:
 
             Remember: 3 sentences max, include decision-maker's name, reference the key fact if available, end with a question."""
             
-            logger.debug(f"Sending context to Gemini for message generation: {entity_name}")
-            response = self.model.generate_content([system_prompt, user_prompt])
+            # Combine system and user prompts
+            full_prompt = f"{system_prompt}\n\n{user_prompt}"
             
-            # Parse JSON response
+            logger.debug(f"Sending context to Vertex AI for message generation: {entity_name}")
+            response = self.model.generate_content(
+                full_prompt,
+                generation_config=self.generation_config
+            )
+            
+            # Parse structured JSON response
             response_text = response.text.strip()
             
-            # Remove markdown code blocks if present
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            
-            response_text = response_text.strip()
-            
+            # Parse the JSON response directly (structured output should be clean JSON)
             message_data = json.loads(response_text)
             draft_message = message_data.get("draft_message", "").strip()
             
@@ -223,6 +217,14 @@ class StrategistAgent:
                 f"Error: {str(e)} - "
                 f"Using fallback template",
                 exc_info=True
+            )
+            
+            # Use fallback template when LLM fails
+            draft_message = self._get_fallback_template(
+                decision_maker=None,  # We don't have decision maker in profile
+                market=market,
+                city=city,
+                entity_name=entity_name
             )
 
         return OutreachDraft(draft_message=draft_message)

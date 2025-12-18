@@ -5,7 +5,7 @@ This module defines Pydantic models for the agentic lead generation pipeline,
 including API request/response models, agent output schemas, and Kafka message formats.
 """
 
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, HttpUrl, Field, ConfigDict
 from typing import Optional, Literal, List
 from datetime import datetime
 import uuid
@@ -112,6 +112,17 @@ class OutreachDraft(BaseModel):
         ..., 
         max_length=500, 
         description="Personalized outreach message"
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            'properties': {
+                'draft_message': {
+                    'description': 'The outreach message to the partner business'
+                },
+
+            }
+        }
     )
 
 
