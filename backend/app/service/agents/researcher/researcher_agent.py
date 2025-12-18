@@ -104,6 +104,7 @@ class ResearcherAgent:
                 all_page_markdowns=sample_markdown_data
                 partner_key_facts = self._extract_key_facts_from_markdown(profile, all_page_markdowns)
                 profile.key_facts=partner_key_facts
+                profile.outreach_draft_message=None
             except Exception as e:
                 logger.error(f"Failed to process partner {profile.org_name}: {e}", exc_info=True)
 

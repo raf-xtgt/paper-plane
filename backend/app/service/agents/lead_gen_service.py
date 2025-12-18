@@ -24,7 +24,7 @@ from app.model.lead_gen_model import (
     PartnerDiscovery,
     PartnerEnrichment,
     OutreachDraft,
-    ScrapedBusinessData
+    ScrapedBusinessData, PageKeyFact
 )
 from typing import List, Dict, Set
 from collections import defaultdict
@@ -181,12 +181,12 @@ class LeadGenPipeline:
         try:
             # Step 1: Scout Agent - Discover partners
             # logger.info("Step 1/4: Scout Agent - Discovering partners")
-            # scout_start = datetime.utcnow()
+            scout_start = datetime.utcnow()
             #
             # # Run Scout agent (now async) - returns ScrapedBusinessData
             # scraped_data = await self.scout.discover_partners(city, market, district)
             #
-            # scout_duration = (datetime.utcnow() - scout_start).total_seconds()
+            scout_duration = (datetime.utcnow() - scout_start).total_seconds()
             # logger.info(
             #     f"Scout Agent complete - found {len(scraped_data)} partners "
             #     f"in {scout_duration:.2f}s"
@@ -328,121 +328,127 @@ class LeadGenPipeline:
 
             # Run Researcher in executor - pass validated Navigator enrichments for enhancement
             loop = asyncio.get_event_loop()
-            final_enrichments = await loop.run_in_executor(
-                None,
-                self.researcher.enrich_partners_from_navigator,
-                partner_profiles
-            )
-            
+            # final_enrichments = await loop.run_in_executor(
+            #     None,
+            #     self.researcher.enrich_partners_from_navigator,
+            #     partner_profiles
+            # )
+
+            final_enrichments: List[PartnerProfile] = [
+                PartnerProfile(
+                    guid="8f6a2fd4-0f83-4429-9f2e-4b39b72f1dc1",
+                    org_name="UIC Medical Centre - Dr. Saurabh Patel",
+                    primary_contact="+1 973-344-2929",
+                    review_score="৪.২",
+                    total_reviews="৮০",
+                    website_url="https://uicmedcentre.com/",
+                    address="99 Madison St",
+                    emails=[
+                        "needhelp@gmail.com",
+                        "info@gmail.com",
+                    ],
+                    phone_numbers=[
+                        "(173) 219-3874", "(360) 327-6556", "(175) 095-8426",
+                        "(447) 917-3040", "(176) 002-6547", "(173) 479-4092",
+                        "(176) 002-6464", "(593) 861-7689", "(949) 857-3652",
+                        "(176) 003-1715", "(684) 312-7335", "(174) 644-9509",
+                        "(175) 975-8655", "(169) 117-8163", "(174) 399-8931",
+                        "(945) 771-6465", "(100) 804-3490", "(172) 771-4275",
+                        "(365) 343-1696", "(172) 927-2122", "(537) 166-6455",
+                        "(174) 613-0462", "(171) 381-7949", "(176) 001-7303",
+                        "(171) 405-5514", "(174) 341-2984", "(813) 763-4563",
+                        "(095) 443-6142", "(217) 946-5330", "(973) 344-2929",
+                        "(914) 138-6395", "(896) 708-5614", "(175) 345-4859",
+                        "(171) 381-7617", "(221) 603-9277", "(521) 203-4282",
+                        "(174) 776-2308", "(176) 002-6557", "(809) 642-7346",
+                        "(361) 817-5920", "(000) 000-0006", "(179) 277-2137",
+                        "(172) 125-0674", "(173) 075-9904", "(943) 578-1033",
+                    ],
+                    internal_urls=[
+                        "https://uicmedcentre.com/about-us/",
+                        "https://uicmedcentre.com/",
+                        "https://uicmedcentre.com/contact-us/",
+                    ],
+                    external_urls=[
+                        "https://uicmedcentre.com/about-us/",
+                        "https://uicmedcentre.com/",
+                        "https://uicmedcentre.com/contact-us/",
+                        "https://www.facebook.com/UICmedical/",
+                        "https://www.instagram.com/uicmedcentre/",
+                    ],
+                    entity_type="Medical Facility",
+                    lead_phase="new",
+                    key_facts=[
+                        PageKeyFact(
+                            page_url="https://uicmedcentre.com/",
+                            markdown_content="<<FULL MARKDOWN OMITTED FOR BREVITY>>",
+                            key_facts=[
+                                "Specializes in walk-in USCIS Immigration Medical Exams and DOT physicals for commercial drivers.",
+                                "Has over 15 years of experience serving the community in Newark, NJ.",
+                                "Focuses on providing convenient and comprehensive healthcare for families, workers, and immigrants.",
+                            ],
+                        ),
+                        PageKeyFact(
+                            page_url="https://uicmedcentre.com/about-us/",
+                            markdown_content="<<FULL MARKDOWN OMITTED FOR BREVITY>>",
+                            key_facts=[
+                                "The Medical Director, Dr. Saurabh Patel, has 21 years of experience in medical practice.",
+                                "The center specializes in sports medicine, obesity/weight management, and occupational medicine, including DOT physicals.",
+                                "Dr. Patel is multilingual, speaking English, Gujarati, and Portuguese.",
+                            ],
+                        ),
+                    ],
+                    outreach_draft_message=None,
+                )
+            ]
             researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
-            complete_count = sum(1 for e in final_enrichments if e.status == "complete")
+            
+            # Step 4: Strategist Agent - Draft messages
+            logger.info(f"Step 4/4: Strategist Agent - Drafting messages for {len(final_enrichments)} partners")
+            strategist_start = datetime.utcnow()
+            
+            # Validate final enrichments before passing to Strategist Agent
+            if not final_enrichments:
+                logger.warning("Researcher Agent returned no final enrichments")
+                return []
+
+            outreach = await loop.run_in_executor(
+                None,
+                self.strategist.generate_outreach_draft_message,
+                final_enrichments,
+                market,
+                city
+            )
+            strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
             logger.info(
-                f"Researcher Agent complete - {complete_count}/{len(final_enrichments)} complete "
-                f"in {researcher_duration:.2f}s"
+                f"Strategist Agent complete - generated {len(lead_objects)} drafts "
+                f"in {strategist_duration:.2f}s"
             )
             
-        #     # Step 4: Strategist Agent - Draft messages
-        #     logger.info(f"Step 4/4: Strategist Agent - Drafting messages for {len(final_enrichments)} partners")
-        #     strategist_start = datetime.utcnow()
+            # Log pipeline summary
+            total_duration = (datetime.utcnow() - start_time).total_seconds()
+            logger.info(
+                f"Pipeline execution complete - "
+                f"city: {city}, market: {market}, "
+                f"total_duration: {total_duration:.2f}s, "
+                f"leads_generated: {len(lead_objects)}, "
+                f"scout: {scout_duration:.2f}s, "
+                f"navigator: {navigator_duration:.2f}s, "
+                f"researcher: {researcher_duration:.2f}s, "
+                f"strategist: {strategist_duration:.2f}s"
+            )
             
-        #     # Validate final enrichments before passing to Strategist Agent
-        #     if not final_enrichments:
-        #         logger.warning("Researcher Agent returned no final enrichments")
-        #         return []
+            return lead_objects
             
-        #     # Convert valid scraped data back to discoveries for Strategist Agent
-        #     discoveries = self._convert_scraped_data_to_discoveries(valid_scraped_data)
-            
-        #     # Ensure discoveries and enrichments lists are aligned
-        #     min_length = min(len(discoveries), len(final_enrichments))
-        #     if len(discoveries) != len(final_enrichments):
-        #         logger.warning(
-        #             f"Mismatched list lengths: {len(discoveries)} discoveries vs {len(final_enrichments)} enrichments. "
-        #             f"Processing first {min_length} items."
-        #         )
-            
-        #     # Process each partner through Strategist
-        #     for i in range(min_length):
-        #         discovery = discoveries[i]
-        #         enrichment = final_enrichments[i]
-        #         try:
-        #             # Validate individual partner data before processing
-        #             if not discovery.entity_name or not enrichment.verified_url:
-        #                 logger.warning(
-        #                     f"Skipping partner with incomplete data - "
-        #                     f"entity_name: {discovery.entity_name}, url: {enrichment.verified_url}"
-        #                 )
-        #                 continue
-                    
-        #             # Run Strategist in executor
-        #             draft = await loop.run_in_executor(
-        #                 None,
-        #                 self.strategist.draft_message,
-        #                 discovery,
-        #                 enrichment,
-        #                 market,
-        #                 city
-        #             )
-                    
-        #             # Validate draft before creating lead object
-        #             if not draft or not draft.draft_message:
-        #                 logger.warning(f"Strategist returned empty draft for {discovery.entity_name}")
-        #                 continue
-                    
-        #             # Format into LeadObject
-        #             lead_object = self._format_lead_object(
-        #                 discovery,
-        #                 enrichment,
-        #                 draft,
-        #                 market,
-        #                 city
-        #             )
-                    
-        #             lead_objects.append(lead_object)
-                    
-        #             logger.debug(
-        #                 f"Lead object created for {discovery.entity_name} - "
-        #                 f"status: {enrichment.status}"
-        #             )
-                    
-        #         except Exception as e:
-        #             logger.error(
-        #                 f"Failed to process partner {discovery.entity_name} - "
-        #                 f"Error: {str(e)} - Skipping this partner",
-        #                 exc_info=True
-        #             )
-        #             continue
-            
-        #     strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
-        #     logger.info(
-        #         f"Strategist Agent complete - generated {len(lead_objects)} drafts "
-        #         f"in {strategist_duration:.2f}s"
-        #     )
-            
-        #     # Log pipeline summary
-        #     total_duration = (datetime.utcnow() - start_time).total_seconds()
-        #     logger.info(
-        #         f"Pipeline execution complete - "
-        #         f"city: {city}, market: {market}, "
-        #         f"total_duration: {total_duration:.2f}s, "
-        #         f"leads_generated: {len(lead_objects)}, "
-        #         f"scout: {scout_duration:.2f}s, "
-        #         f"navigator: {navigator_duration:.2f}s, "
-        #         f"researcher: {researcher_duration:.2f}s, "
-        #         f"strategist: {strategist_duration:.2f}s"
-        #     )
-            
-        #     return lead_objects
-            
-        # except asyncio.TimeoutError:
-        #     duration = (datetime.utcnow() - start_time).total_seconds()
-        #     logger.error(
-        #         f"Pipeline timeout exceeded - "
-        #         f"city: {city}, market: {market}, "
-        #         f"timeout: {self.pipeline_timeout}s, "
-        #         f"duration: {duration:.2f}s, "
-        #         f"partial_results: {len(lead_objects)} leads"
-        #     )
+        except asyncio.TimeoutError:
+            duration = (datetime.utcnow() - start_time).total_seconds()
+            logger.error(
+                f"Pipeline timeout exceeded - "
+                f"city: {city}, market: {market}, "
+                f"timeout: {self.pipeline_timeout}s, "
+                f"duration: {duration:.2f}s, "
+                f"partial_results: {len(lead_objects)} leads"
+            )
             # Return partial results if any
             return lead_objects
             
@@ -639,7 +645,8 @@ class LeadGenPipeline:
                     external_urls=list(aggregated_data['external_urls']) or None,
                     entity_type=self._determine_entity_type(scraped_data.org_name),
                     lead_phase="new",  # Default phase for new leads
-                    key_facts=[]
+                    key_facts=[],
+                    outreach_draft_message=None,
                 )
             else:
                 # Fallback if no matching ScrapedBusinessData found
@@ -653,7 +660,8 @@ class LeadGenPipeline:
                     external_urls=list(aggregated_data['external_urls']) or None,
                     entity_type="Unknown",
                     lead_phase="new",
-                    key_facts=[]
+                    key_facts=[],
+                    outreach_draft_message=None,
                 )
             
             final_profiles.append(profile)

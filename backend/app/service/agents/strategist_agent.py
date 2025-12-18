@@ -9,9 +9,9 @@ key facts, and maintain a professional yet casual tone.
 import os
 import logging
 import json
-from typing import Optional
+from typing import Optional, List
 import google.generativeai as genai
-from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, OutreachDraft
+from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, OutreachDraft, PartnerProfile, PageKeyFact
 
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.strategist")
@@ -117,13 +117,11 @@ class StrategistAgent:
             f"Would love to explore a partnership. Open to a quick chat?"
         )
     
-    def draft_message(
-        self,
-        partner_discovery: PartnerDiscovery,
-        partner_enrichment: PartnerEnrichment,
+    def generate_outreach_draft_message(self,
+        partner_profiles: List[PartnerProfile],
         market: str,
-        city: str
-    ) -> OutreachDraft:
+        city: str,
+    ) -> List[PartnerProfile]:
         """
         Generate personalized outreach message for a partner.
         
@@ -136,40 +134,51 @@ class StrategistAgent:
         Returns:
             OutreachDraft object with draft_message field
         """
-        entity_name = partner_discovery.entity_name
-        decision_maker = partner_enrichment.decision_maker
-        key_fact = partner_enrichment.key_fact
+
+        for profile in partner_profiles:
+            outreach_msg = self.process_partner_profile_for_outreach(profile, market, city)
+            profile.outreach_draft_message = outreach_msg
+        return partner_profiles
+
+    def _concatenate_key_facts(self, pages: List[PageKeyFact]) -> str:
+        """
+        Concatenates key facts from a list of PageKeyFact objects into a single string.
+        Each key fact is separated by a line break tag (<br/>).
+
+        Args:
+            pages: List of PageKeyFact instances
+
+        Returns:
+            A single string containing all key facts separated by <br/>
+        """
+        all_key_facts: List[str] = []
+
+        for page in pages:
+            all_key_facts.extend(page.key_facts)
+
+        return "\n".join(all_key_facts)
+
+    def process_partner_profile_for_outreach(self, profile:PartnerProfile, market:str, city:str) -> OutreachDraft:
+
+        entity_name = profile.org_name
+        key_facts = self._concatenate_key_facts(profile.key_facts)
         
         logger.info(
             f"Drafting message for: {entity_name} - "
-            f"decision_maker: {bool(decision_maker)}, "
-            f"key_fact: {bool(key_fact)}"
         )
-        
-        # Check if we have minimum required data
-        if not decision_maker:
-            logger.warning(
-                f"No decision-maker found for {entity_name} - "
-                f"Using fallback template"
-            )
-            fallback_message = self._get_fallback_template(
-                decision_maker, market, city, entity_name
-            )
-            return OutreachDraft(draft_message=fallback_message)
-        
+        draft_message = ""
         try:
             system_prompt = self._get_system_prompt(market)
             
             # Build context for LLM
             context_parts = [
                 f"Partner Organization: {entity_name}",
-                f"Decision Maker: {decision_maker}",
                 f"Market: {market}",
                 f"City: {city}"
             ]
             
-            if key_fact:
-                context_parts.append(f"Key Fact: {key_fact}")
+            if key_facts:
+                context_parts.append(f"Key Facts: {key_facts}")
             else:
                 context_parts.append("Key Fact: Not available (focus on partnership opportunity)")
             
@@ -177,9 +186,9 @@ class StrategistAgent:
             
             user_prompt = f"""Write a personalized WhatsApp message for this potential partner:
 
-{context}
+            {context}
 
-Remember: 3 sentences max, include decision-maker's name, reference the key fact if available, end with a question."""
+            Remember: 3 sentences max, include decision-maker's name, reference the key fact if available, end with a question."""
             
             logger.debug(f"Sending context to Gemini for message generation: {entity_name}")
             response = self.model.generate_content([system_prompt, user_prompt])
@@ -203,38 +212,11 @@ Remember: 3 sentences max, include decision-maker's name, reference the key fact
             if not draft_message:
                 raise ValueError("Empty draft_message in LLM response")
             
-            # Validate message length (should be concise)
-            if len(draft_message) > 500:
-                logger.warning(
-                    f"Generated message too long ({len(draft_message)} chars) for {entity_name} - "
-                    f"Using fallback template"
-                )
-                fallback_message = self._get_fallback_template(
-                    decision_maker, market, city, entity_name
-                )
-                return OutreachDraft(draft_message=fallback_message)
-            
             logger.info(
                 f"Successfully generated message for {entity_name} - "
                 f"length: {len(draft_message)} chars"
             )
-            
-            return OutreachDraft(draft_message=draft_message)
-            
-        except json.JSONDecodeError as e:
-            logger.error(
-                f"Failed to parse LLM JSON response for {entity_name} - "
-                f"Error: {str(e)} - "
-                f"Using fallback template",
-                exc_info=True
-            )
-            logger.debug(f"Raw LLM response: {response.text if 'response' in locals() else 'N/A'}")
-            
-            fallback_message = self._get_fallback_template(
-                decision_maker, market, city, entity_name
-            )
-            return OutreachDraft(draft_message=fallback_message)
-            
+
         except Exception as e:
             logger.error(
                 f"Message generation failed for {entity_name} - "
@@ -242,8 +224,5 @@ Remember: 3 sentences max, include decision-maker's name, reference the key fact
                 f"Using fallback template",
                 exc_info=True
             )
-            
-            fallback_message = self._get_fallback_template(
-                decision_maker, market, city, entity_name
-            )
-            return OutreachDraft(draft_message=fallback_message)
+
+        return OutreachDraft(draft_message=draft_message)

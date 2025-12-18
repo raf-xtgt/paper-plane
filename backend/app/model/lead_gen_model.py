@@ -208,7 +208,7 @@ class PartnerProfile(ScrapedBusinessData):
         None, description="Current phase in the lead pipeline (e.g., 'new', 'contacted')"
     )
     key_facts: Optional[List[PageKeyFact]] = Field(None, description="List of partner key facts")
-
+    outreach_draft_message: Optional[OutreachDraft] = Field(None, description="Outreach draft message")
 
 class LeadObject(BaseModel):
     """
