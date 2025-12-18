@@ -58,7 +58,7 @@ class ResearcherAgent:
         logger.info(f"Researcher Agent initialized with model: {self.model_name}, timeout: {self.timeout}s")
 
     
-    def enrich_partners_from_navigator(self, partner_profiles: List[PartnerProfile]) -> List[PartnerEnrichment]:
+    def enrich_partners_from_navigator(self, partner_profiles: List[PartnerProfile]) -> List[PartnerProfile]:
         """
         Enrich partner profiles by crawling their internal and external URLs.
         
@@ -69,9 +69,7 @@ class ResearcherAgent:
             List of PartnerEnrichment objects with extracted data
         """
         logger.info(f"Starting enrichment for {len(partner_profiles)} partner profiles")
-        
-        enrichments = []
-        
+
         for profile in partner_profiles:
             try:
                 logger.info(f"Processing partner: {profile.org_name} (GUID: {profile.guid})")
@@ -104,16 +102,13 @@ class ResearcherAgent:
                 
                 # Process the markdown content to extract enrichment data
                 all_page_markdowns=sample_markdown_data
-                page_key_facts = self._extract_key_facts_from_markdown(profile, all_page_markdowns)
-
-                
+                partner_key_facts = self._extract_key_facts_from_markdown(profile, all_page_markdowns)
+                profile.key_facts=partner_key_facts
             except Exception as e:
                 logger.error(f"Failed to process partner {profile.org_name}: {e}", exc_info=True)
-                # Create incomplete enrichment as fallback
 
-        
-        logger.info(f"Enrichment complete. Processed {len(enrichments)} partners")
-        return enrichments
+        logger.info(f"Enrichment complete. Processed {len(partner_profiles)} partners")
+        return partner_profiles
     
     def _extract_key_facts_from_markdown(self, profile: ScrapedBusinessData, page_markdowns: List[PageMarkdown]) -> List[PageKeyFact]:
         """

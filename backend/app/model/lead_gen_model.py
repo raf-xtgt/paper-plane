@@ -117,6 +117,57 @@ class OutreachDraft(BaseModel):
 
 # Kafka Message Models
 
+
+class PartnerContact(BaseModel):
+    lead_guid:str
+    name: str
+    contact_info: str
+    url: str
+    class Config:
+        frozen = True
+
+class AIContext(BaseModel):
+    """
+    AI-generated context and insights for Kafka message.
+    
+    Attributes:
+        key_insight: Key fact discovered about the partner
+        draft_message: AI-generated outreach message draft
+    """
+    key_insight: Optional[str] = Field(None, description="Key insight about partner")
+    draft_message: str = Field(..., description="Draft outreach message")
+
+
+class SearchQuery(BaseModel):
+    query: str
+
+
+class PageMarkdown(BaseModel):
+    """
+    Crawled page data with markdown content.
+    
+    Attributes:
+        page_url: URL of the crawled page
+        markdown_content: Extracted content in markdown format
+    """
+    page_url: str = Field(..., description="URL of the crawled page")
+    markdown_content: str = Field(..., description="Extracted content in markdown format")
+
+
+class PageKeyFact(PageMarkdown):
+    """
+    Extended page data with extracted key facts.
+    
+    Inherits from PageMarkdown and adds key facts extraction.
+    
+    Attributes:
+        page_url: URL of the crawled page (inherited)
+        markdown_content: Extracted content in markdown format (inherited)
+        key_facts: List of extracted key facts from the page content
+    """
+    key_facts: List[str] = Field(..., description="List of extracted key facts from the page content")
+
+
 class ScrapedBusinessData(BaseModel):
     """
     Raw data extracted from Google Maps business card.
@@ -156,36 +207,16 @@ class PartnerProfile(ScrapedBusinessData):
     lead_phase: Optional[str] = Field(
         None, description="Current phase in the lead pipeline (e.g., 'new', 'contacted')"
     )
-
-
-
-class PartnerContact(BaseModel):
-    lead_guid:str
-    name: str
-    contact_info: str
-    url: str
-    class Config:
-        frozen = True
-
-class AIContext(BaseModel):
-    """
-    AI-generated context and insights for Kafka message.
-    
-    Attributes:
-        key_insight: Key fact discovered about the partner
-        draft_message: AI-generated outreach message draft
-    """
-    key_insight: Optional[str] = Field(None, description="Key insight about partner")
-    draft_message: str = Field(..., description="Draft outreach message")
+    key_facts: Optional[List[PageKeyFact]] = Field(None, description="List of partner key facts")
 
 
 class LeadObject(BaseModel):
     """
     Complete lead data structure for Kafka "lead_generated" topic.
-    
+
     This model represents the final output of the ADK pipeline,
     containing all discovered and enriched partner information.
-    
+
     Attributes:
         event_type: Type of event (always "lead_discovered")
         timestamp: When the lead was generated
@@ -202,37 +233,4 @@ class LeadObject(BaseModel):
     city: str = Field(..., description="Target city")
     partner_profile: PartnerProfile = Field(..., description="Partner details")
     ai_context: AIContext = Field(..., description="AI-generated context")
-
-
-
-
-class SearchQuery(BaseModel):
-    query: str
-
-
-class PageMarkdown(BaseModel):
-    """
-    Crawled page data with markdown content.
-    
-    Attributes:
-        page_url: URL of the crawled page
-        markdown_content: Extracted content in markdown format
-    """
-    page_url: str = Field(..., description="URL of the crawled page")
-    markdown_content: str = Field(..., description="Extracted content in markdown format")
-
-
-class PageKeyFact(PageMarkdown):
-    """
-    Extended page data with extracted key facts.
-    
-    Inherits from PageMarkdown and adds key facts extraction.
-    
-    Attributes:
-        page_url: URL of the crawled page (inherited)
-        markdown_content: Extracted content in markdown format (inherited)
-        key_facts: List of extracted key facts from the page content
-    """
-    key_facts: List[str] = Field(..., description="List of extracted key facts from the page content")
-
 

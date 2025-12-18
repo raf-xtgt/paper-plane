@@ -310,7 +310,8 @@ class LeadGenPipeline:
                         'https://www.instagram.com/uicmedcentre/'
                     ],
                     entity_type='Medical Facility',
-                    lead_phase='new'
+                    lead_phase='new',
+                    key_facts=[]
                 )
             ]
 
@@ -637,7 +638,8 @@ class LeadGenPipeline:
                     internal_urls=list(aggregated_data['internal_urls']) or None,
                     external_urls=list(aggregated_data['external_urls']) or None,
                     entity_type=self._determine_entity_type(scraped_data.org_name),
-                    lead_phase="new"  # Default phase for new leads
+                    lead_phase="new",  # Default phase for new leads
+                    key_facts=[]
                 )
             else:
                 # Fallback if no matching ScrapedBusinessData found
@@ -650,7 +652,8 @@ class LeadGenPipeline:
                     internal_urls=list(aggregated_data['internal_urls']) or None,
                     external_urls=list(aggregated_data['external_urls']) or None,
                     entity_type="Unknown",
-                    lead_phase="new"
+                    lead_phase="new",
+                    key_facts=[]
                 )
             
             final_profiles.append(profile)
