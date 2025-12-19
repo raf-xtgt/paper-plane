@@ -20,9 +20,6 @@ from app.model.lead_gen_model import (
     LeadObject,
     PartnerProfile,
     PartnerContact,
-    AIContext,
-    PartnerDiscovery,
-    PartnerEnrichment,
     OutreachDraft,
     ScrapedBusinessData, PageKeyFact
 )
@@ -60,7 +57,7 @@ class LeadGenPipeline:
         self.lead_producer = LeadGenProducer()
         
         # Load configuration
-        self.pipeline_timeout = int(os.getenv("LEAD_GEN_TIMEOUT", "600"))  # 5 minutes default
+        self.pipeline_timeout = int(os.getenv("LEAD_GEN_TIMEOUT", "36000"))  # 5 minutes default
         
         logger.info(
             f"Pipeline initialized - timeout: {self.pipeline_timeout}s, "
@@ -102,83 +99,44 @@ class LeadGenPipeline:
             scout_start = datetime.utcnow()
             #
             # # Run Scout agent (now async) - returns ScrapedBusinessData
-            # scraped_data = await self.scout.discover_partners(city, market, district)
-            #
+            scraped_data = await self.scout.discover_partners(city, market, district)
             scout_duration = (datetime.utcnow() - scout_start).total_seconds()
-            # logger.info(
-            #     f"Scout Agent complete - found {len(scraped_data)} partners "
-            #     f"in {scout_duration:.2f}s"
-            # )
-            #
-            # if not scraped_data:
-            #     logger.warning(
-            #         f"Scout Agent returned no partners - city: {city}, market: {market}. "
-            #         f"Pipeline complete with empty results."
-            #     )
-            #     return []
+            logger.info(
+                f"Scout Agent complete - found {len(scraped_data)} partners "
+                f"in {scout_duration:.2f}s"
+            )
+
+            if not scraped_data:
+                logger.warning(
+                    f"Scout Agent returned no partners - city: {city}, market: {market}. "
+                    f"Pipeline complete with empty results."
+                )
+                return []
 
             
             # Step 2: Navigator Agent - Extract contact information from websites
-            # logger.info(f"Step 2/4: Navigator Agent - Extracting contact info from {len(scraped_data)} partner websites")
+            logger.info(f"Step 2/4: Navigator Agent - Extracting contact info from {len(scraped_data)} partner websites")
             navigator_start = datetime.utcnow()
             
-            # # Validate scraped data before passing to Navigator Agent
-            # valid_scraped_data = [
-            #     data for data in scraped_data
-            #     if data.website_url and ("http" in str(data.website_url) or "https" in str(data.website_url))
-            # ]
-            # if len(valid_scraped_data) != len(scraped_data):
-            #     logger.warning(
-            #         f"Filtered out {len(scraped_data) - len(valid_scraped_data)} partners without valid website URLs"
-            #     )
-            #
-            # if not valid_scraped_data:
-            #     logger.warning("No partners with valid website URLs found after validation")
-            #     return []
-            
-            valid_scraped_data  = [
-                # ScrapedBusinessData(
-                #     guid='043cd6bc-21ca-49c7-a068-34e301119b8b',
-                #     org_name='Optimum Diagnostic Imaging',
-                #     primary_contact='+1 973-521-5685',
-                #     review_score='৪.৪',
-                #     total_reviews='৯১',
-                #     website_url='https://odinj.com/',
-                #     address='243 Chestnut St'
-                # ),
-                # ScrapedBusinessData(
-                #     guid='63d07ba8-e0b7-4e03-b020-c667289480e1',
-                #     org_name='Newark Imaging Open MRI',
-                #     primary_contact='+1 973-589-7777',
-                #     review_score='৪.৭',
-                #     total_reviews='৮৭',
-                #     website_url='http://www.newarkimaging.com/',
-                #     address='400 Delancy St Suite 108'
-                # ),
-                ScrapedBusinessData(
-                    guid='8f6a2fd4-0f83-4429-9f2e-4b39b72f1dc1',
-                    org_name='UIC Medical Centre - Dr. Saurabh Patel',
-                    primary_contact='+1 973-344-2929',
-                    review_score='৪.২',
-                    total_reviews='৮০',
-                    website_url='https://uicmedcentre.com/',
-                    address='99 Madison St'
-                ),
-                # ScrapedBusinessData(
-                #     guid='98065337-e837-4813-af60-47229e37a8e4',
-                #     org_name="Children's Specialized Hospital Center – Newark",
-                #     primary_contact='+1 888-244-5373',
-                #     review_score='৪.৮',
-                #     total_reviews='৪৩',
-                #     website_url='https://www.rwjbh.org/our-locations/pediatric-outpatient-facilities/childrens-specialized-outpatient-center-at-newar/',
-                #     address='182 Lyons Ave'
-                # )
+            # Validate scraped data before passing to Navigator Agent
+            valid_scraped_data = [
+                data for data in scraped_data
+                if data.website_url and ("http" in str(data.website_url) or "https" in str(data.website_url))
             ]
+            if len(valid_scraped_data) != len(scraped_data):
+                logger.warning(
+                    f"Filtered out {len(scraped_data) - len(valid_scraped_data)} partners without valid website URLs"
+                )
+
+            if not valid_scraped_data:
+                logger.warning("No partners with valid website URLs found after validation")
+                return []
+
             print("valid_scraped_data")
-            print(valid_scraped_data)
+            # print(valid_scraped_data)
 
             # Run Navigator Agent (async) - use validated scraped_data from Scout
-            # partner_contacts = await self.navigator.navigate_and_extract_batch(valid_scraped_data)
+            partner_contacts = await self.navigator.navigate_and_extract_batch(valid_scraped_data)
             
             navigator_duration = (datetime.utcnow() - navigator_start).total_seconds()
 
@@ -186,52 +144,8 @@ class LeadGenPipeline:
             # print(partner_contacts)
 
             # Step 3: Researcher Agent - Enhance Navigator enrichments with additional details
-            # logger.info(f"Step 3/4: Researcher Agent - Enhancing {len(partner_contacts)} Navigator enrichments")
-            # partner_profiles = self.consolidate_partner_data(partner_contacts, valid_scraped_data)
-            partner_profiles: List[PartnerProfile] = [
-                PartnerProfile(
-                    guid='8f6a2fd4-0f83-4429-9f2e-4b39b72f1dc1',
-                    org_name='UIC Medical Centre - Dr. Saurabh Patel',
-                    primary_contact='+1 973-344-2929',
-                    review_score='৪.২',
-                    total_reviews='৮০',
-                    website_url='https://uicmedcentre.com/',
-                    address='99 Madison St',
-                    emails=['needhelp@gmail.com', 'info@gmail.com'],
-                    phone_numbers=[
-                        '(173) 219-3874', '(360) 327-6556', '(175) 095-8426',
-                        '(447) 917-3040', '(176) 002-6547', '(173) 479-4092',
-                        '(176) 002-6464', '(593) 861-7689', '(949) 857-3652',
-                        '(176) 003-1715', '(684) 312-7335', '(174) 644-9509',
-                        '(175) 975-8655', '(169) 117-8163', '(174) 399-8931',
-                        '(945) 771-6465', '(100) 804-3490', '(172) 771-4275',
-                        '(365) 343-1696', '(172) 927-2122', '(537) 166-6455',
-                        '(174) 613-0462', '(171) 381-7949', '(176) 001-7303',
-                        '(171) 405-5514', '(174) 341-2984', '(813) 763-4563',
-                        '(095) 443-6142', '(217) 946-5330', '(973) 344-2929',
-                        '(914) 138-6395', '(896) 708-5614', '(175) 345-4859',
-                        '(171) 381-7617', '(221) 603-9277', '(521) 203-4282',
-                        '(174) 776-2308', '(176) 002-6557', '(809) 642-7346',
-                        '(361) 817-5920', '(000) 000-0006', '(179) 277-2137',
-                        '(172) 125-0674', '(173) 075-9904', '(943) 578-1033'
-                    ],
-                    internal_urls=[
-                        'https://uicmedcentre.com/about-us/',
-                        'https://uicmedcentre.com/',
-                        'https://uicmedcentre.com/contact-us/'
-                    ],
-                    external_urls=[
-                        'https://uicmedcentre.com/about-us/',
-                        'https://uicmedcentre.com/',
-                        'https://uicmedcentre.com/contact-us/',
-                        'https://www.facebook.com/UICmedical/',
-                        'https://www.instagram.com/uicmedcentre/'
-                    ],
-                    entity_type='Medical Facility',
-                    lead_phase='new',
-                    key_facts=[]
-                )
-            ]
+            logger.info(f"Step 3/4: Researcher Agent - Enhancing {len(partner_contacts)} Navigator enrichments")
+            partner_profiles = self.consolidate_partner_data(partner_contacts, valid_scraped_data)
 
             print("partner_profiles")
             print(partner_profiles)
@@ -246,79 +160,12 @@ class LeadGenPipeline:
 
             # Run Researcher in executor - pass validated Navigator enrichments for enhancement
             loop = asyncio.get_event_loop()
-            # final_enrichments = await loop.run_in_executor(
-            #     None,
-            #     self.researcher.enrich_partners_from_navigator,
-            #     partner_profiles
-            # )
+            final_enrichments = await loop.run_in_executor(
+                None,
+                self.researcher.enrich_partners_from_navigator,
+                partner_profiles
+            )
 
-            final_enrichments: List[PartnerProfile] = [
-                PartnerProfile(
-                    guid="8f6a2fd4-0f83-4429-9f2e-4b39b72f1dc1",
-                    org_name="UIC Medical Centre - Dr. Saurabh Patel",
-                    primary_contact="+1 973-344-2929",
-                    review_score="৪.২",
-                    total_reviews="৮০",
-                    website_url="https://uicmedcentre.com/",
-                    address="99 Madison St",
-                    emails=[
-                        "needhelp@gmail.com",
-                        "info@gmail.com",
-                    ],
-                    phone_numbers=[
-                        "(173) 219-3874", "(360) 327-6556", "(175) 095-8426",
-                        "(447) 917-3040", "(176) 002-6547", "(173) 479-4092",
-                        "(176) 002-6464", "(593) 861-7689", "(949) 857-3652",
-                        "(176) 003-1715", "(684) 312-7335", "(174) 644-9509",
-                        "(175) 975-8655", "(169) 117-8163", "(174) 399-8931",
-                        "(945) 771-6465", "(100) 804-3490", "(172) 771-4275",
-                        "(365) 343-1696", "(172) 927-2122", "(537) 166-6455",
-                        "(174) 613-0462", "(171) 381-7949", "(176) 001-7303",
-                        "(171) 405-5514", "(174) 341-2984", "(813) 763-4563",
-                        "(095) 443-6142", "(217) 946-5330", "(973) 344-2929",
-                        "(914) 138-6395", "(896) 708-5614", "(175) 345-4859",
-                        "(171) 381-7617", "(221) 603-9277", "(521) 203-4282",
-                        "(174) 776-2308", "(176) 002-6557", "(809) 642-7346",
-                        "(361) 817-5920", "(000) 000-0006", "(179) 277-2137",
-                        "(172) 125-0674", "(173) 075-9904", "(943) 578-1033",
-                    ],
-                    internal_urls=[
-                        "https://uicmedcentre.com/about-us/",
-                        "https://uicmedcentre.com/",
-                        "https://uicmedcentre.com/contact-us/",
-                    ],
-                    external_urls=[
-                        "https://uicmedcentre.com/about-us/",
-                        "https://uicmedcentre.com/",
-                        "https://uicmedcentre.com/contact-us/",
-                        "https://www.facebook.com/UICmedical/",
-                        "https://www.instagram.com/uicmedcentre/",
-                    ],
-                    entity_type="Medical Facility",
-                    lead_phase="new",
-                    key_facts=[
-                        PageKeyFact(
-                            page_url="https://uicmedcentre.com/",
-                            markdown_content="<<FULL MARKDOWN OMITTED FOR BREVITY>>",
-                            key_facts=[
-                                "Specializes in walk-in USCIS Immigration Medical Exams and DOT physicals for commercial drivers.",
-                                "Has over 15 years of experience serving the community in Newark, NJ.",
-                                "Focuses on providing convenient and comprehensive healthcare for families, workers, and immigrants.",
-                            ],
-                        ),
-                        PageKeyFact(
-                            page_url="https://uicmedcentre.com/about-us/",
-                            markdown_content="<<FULL MARKDOWN OMITTED FOR BREVITY>>",
-                            key_facts=[
-                                "The Medical Director, Dr. Saurabh Patel, has 21 years of experience in medical practice.",
-                                "The center specializes in sports medicine, obesity/weight management, and occupational medicine, including DOT physicals.",
-                                "Dr. Patel is multilingual, speaking English, Gujarati, and Portuguese.",
-                            ],
-                        ),
-                    ],
-                    outreach_draft_message=None,
-                )
-            ]
             researcher_duration = (datetime.utcnow() - researcher_start).total_seconds()
             
             # Step 4: Strategist Agent - Draft messages
@@ -330,81 +177,14 @@ class LeadGenPipeline:
                 logger.warning("Researcher Agent returned no final enrichments")
                 return []
 
-            # outreach = await loop.run_in_executor(
-            #     None,
-            #     self.strategist.generate_outreach_draft_message,
-            #     final_enrichments,
-            #     market,
-            #     city
-            # )
+            outreach = await loop.run_in_executor(
+                None,
+                self.strategist.generate_outreach_draft_message,
+                final_enrichments,
+                market,
+                city
+            )
 
-            outreach: List[PartnerProfile] = [
-                PartnerProfile(
-                    guid="8f6a2fd4-0f83-4429-9f2e-4b39b72f1dc1",
-                    org_name="UIC Medical Centre - Dr. Saurabh Patel",
-                    primary_contact="+1 973-344-2929",
-                    review_score="৪.২",
-                    total_reviews="৮০",
-                    website_url="https://uicmedcentre.com/",
-                    address="99 Madison St",
-                    emails=[
-                        "needhelp@gmail.com",
-                        "info@gmail.com",
-                    ],
-                    phone_numbers=[
-                        "(173) 219-3874", "(360) 327-6556", "(175) 095-8426",
-                        "(447) 917-3040", "(176) 002-6547", "(173) 479-4092",
-                        "(176) 002-6464", "(593) 861-7689", "(949) 857-3652",
-                        "(176) 003-1715", "(684) 312-7335", "(174) 644-9509",
-                        "(175) 975-8655", "(169) 117-8163", "(174) 399-8931",
-                        "(945) 771-6465", "(100) 804-3490", "(172) 771-4275",
-                        "(365) 343-1696", "(172) 927-2122", "(537) 166-6455",
-                        "(174) 613-0462", "(171) 381-7949", "(176) 001-7303",
-                        "(171) 405-5514", "(174) 341-2984", "(813) 763-4563",
-                        "(095) 443-6142", "(217) 946-5330", "(973) 344-2929",
-                        "(914) 138-6395", "(896) 708-5614", "(175) 345-4859",
-                        "(171) 381-7617", "(221) 603-9277", "(521) 203-4282",
-                        "(174) 776-2308", "(176) 002-6557", "(809) 642-7346",
-                        "(361) 817-5920", "(000) 000-0006", "(179) 277-2137",
-                        "(172) 125-0674", "(173) 075-9904", "(943) 578-1033",
-                    ],
-                    internal_urls=[
-                        "https://uicmedcentre.com/about-us/",
-                        "https://uicmedcentre.com/",
-                        "https://uicmedcentre.com/contact-us/",
-                    ],
-                    external_urls=[
-                        "https://uicmedcentre.com/about-us/",
-                        "https://uicmedcentre.com/",
-                        "https://uicmedcentre.com/contact-us/",
-                        "https://www.facebook.com/UICmedical/",
-                        "https://www.instagram.com/uicmedcentre/",
-                    ],
-                    entity_type="Medical Facility",
-                    lead_phase="new",
-                    key_facts=[
-                        PageKeyFact(
-                            page_url="https://uicmedcentre.com/",
-                            markdown_content="<<FULL MARKDOWN OMITTED FOR BREVITY>>",
-                            key_facts=[
-                                "Specializes in walk-in USCIS Immigration Medical Exams and DOT physicals for commercial drivers.",
-                                "Has over 15 years of experience serving the community in Newark, NJ.",
-                                "Focuses on providing convenient and comprehensive healthcare for families, workers, and immigrants.",
-                            ],
-                        ),
-                        PageKeyFact(
-                            page_url="https://uicmedcentre.com/about-us/",
-                            markdown_content="<<FULL MARKDOWN OMITTED FOR BREVITY>>",
-                            key_facts=[
-                                "The Medical Director, Dr. Saurabh Patel, has 21 years of experience in medical practice.",
-                                "The center specializes in sports medicine, obesity/weight management, and occupational medicine, including DOT physicals.",
-                                "Dr. Patel is multilingual, speaking English, Gujarati, and Portuguese.",
-                            ],
-                        ),
-                    ],
-                    outreach_draft_message=OutreachDraft(draft_message="Hi Dr. Patel, your center's specialization in USCIS Immigration Medical Exams in Newark really stands out. My work involves connecting medical tourism agencies with experienced partners like yourself, and I see a strong potential for collaboration. Are you open to a brief chat to explore this further?"),
-                )
-            ]
             strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
             logger.info(
                 f"Strategist Agent complete - generated {len(lead_objects)} drafts "

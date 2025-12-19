@@ -39,7 +39,7 @@ class NavigatorCrawler:
         self.visited_urls.add(url)
 
         try:
-            await page.goto(url, wait_until="networkidle")
+            await page.goto(url, wait_until="networkidle", timeout=90000)
             await self._handle_dynamic_content(page)
 
             page_contacts = await self._extract_contacts(page)

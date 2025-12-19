@@ -43,7 +43,7 @@ class ScoutAgent:
                 "temperature": self.temperature,
                 "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": 2048,
+                "max_output_tokens": 4096,
             }
         )
         
@@ -272,7 +272,7 @@ class ScoutAgent:
             all_scraped_data = []
             for query in queries:
                 logger.info(f"search query: {query} ")
-                scraped_data = await self._scrape_google_maps(query, max_results=2)
+                scraped_data = await self._scrape_google_maps(query, max_results=7)
                 all_scraped_data.extend(scraped_data)
             
             if not all_scraped_data:

@@ -37,9 +37,9 @@ class NavigatorAgent:
         # Configuration from environment variables
         self.model_name = os.getenv("ADK_MODEL_FLASH", "gemini-2.0-flash-exp")
         self.temperature = float(os.getenv("NAVIGATOR_TEMPERATURE", "0.1"))
-        self.timeout = int(os.getenv("NAVIGATOR_TIMEOUT", "180"))
-        self.page_timeout = int(os.getenv("NAVIGATOR_PAGE_TIMEOUT", "90"))
-        self.max_retries = int(os.getenv("NAVIGATOR_MAX_RETRIES", "3"))
+        self.timeout = int(os.getenv("NAVIGATOR_TIMEOUT", "3600"))
+        self.page_timeout = int(os.getenv("NAVIGATOR_PAGE_TIMEOUT", "3600"))
+        self.max_retries = int(os.getenv("NAVIGATOR_MAX_RETRIES", "3600"))
         self.concurrent_limit = int(os.getenv("NAVIGATOR_CONCURRENT_LIMIT", "5"))
         
         # Initialize Gemini model with proper configuration
@@ -49,7 +49,7 @@ class NavigatorAgent:
                 "temperature": self.temperature,
                 "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": 1024,
+                "max_output_tokens": 4096,
                 "response_mime_type": "application/json"
             }
         )

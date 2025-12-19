@@ -137,18 +137,6 @@ class PartnerContact(BaseModel):
     class Config:
         frozen = True
 
-class AIContext(BaseModel):
-    """
-    AI-generated context and insights for Kafka message.
-    
-    Attributes:
-        key_insight: Key fact discovered about the partner
-        draft_message: AI-generated outreach message draft
-    """
-    key_insight: Optional[str] = Field(None, description="Key insight about partner")
-    draft_message: str = Field(..., description="Draft outreach message")
-
-
 class SearchQuery(BaseModel):
     query: str
 
@@ -243,5 +231,4 @@ class LeadObject(BaseModel):
     market: str = Field(..., description="Market vertical")
     city: str = Field(..., description="Target city")
     partner_profile: PartnerProfile = Field(..., description="Partner details")
-    ai_context: AIContext = Field(..., description="AI-generated context")
 

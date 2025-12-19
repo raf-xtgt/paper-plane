@@ -8,14 +8,13 @@ information, contact details, and key facts for personalization.
 
 import os
 import logging
-import asyncio
 import json
-from app.service.agents.researcher.all_markdowns import sample_markdown_data
+import asyncio
+from app.service.agents.researcher.researcher_crawler import ResearcherCrawler
 from typing import List
 import google.generativeai as genai
-from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, PartnerProfile, PageMarkdown, \
+from app.model.lead_gen_model import PartnerEnrichment, PartnerProfile, PageMarkdown, \
     PageKeyFact, ScrapedBusinessData
-from app.service.agents.researcher.researcher_crawler import ResearcherCrawler
 
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.researcher")
@@ -37,8 +36,8 @@ class ResearcherAgent:
         """Initialize Researcher Agent with Gemini Flash model."""
         self.model_name = os.getenv("ADK_MODEL_PRO", "gemini-2.0-flash")
         self.temperature = 0.2
-        self.timeout = int(os.getenv("RESEARCHER_TIMEOUT", "30"))
-        
+        self.timeout = int(os.getenv("RESEARCHER_TIMEOUT", "3600"))
+        self.research_crawler = ResearcherCrawler(max_pages=5)
         # Initialize Gemini model
         self.model = genai.GenerativeModel(
             model_name=self.model_name,
@@ -46,7 +45,7 @@ class ResearcherAgent:
                 "temperature": self.temperature,
                 "top_p": 0.95,
                 "top_k": 40,
-                "max_output_tokens": 1024,
+                "max_output_tokens": 4096,
             }
         )
         
@@ -77,31 +76,28 @@ class ResearcherAgent:
 
                 # Crawl all URLs and collect markdown content
                 all_page_markdowns = []
-                # try:
-                #     logger.debug(f"Crawling URL: {url}")
-                #
-                #     # Run crawler asynchronously
-                #     loop = asyncio.new_event_loop()
-                #     asyncio.set_event_loop(loop)
-                #
-                #     try:
-                #         crawler = ResearcherCrawler(max_pages=5)  # Limit pages per URL
-                #         page_markdowns = loop.run_until_complete(crawler.start(url))
-                #         all_page_markdowns.extend(page_markdowns)
-                #         logger.debug(f"Crawled {len(page_markdowns)} pages from {url}")
-                #
-                #     finally:
-                #         loop.close()
-                #
-                # except Exception as e:
-                #     logger.error(f"Failed to crawl URL {url} for {profile.org_name}: {e}")
-                #     continue
+                try:
+                    logger.debug(f"Crawling URL: {url}")
 
-                # all_page_markdowns = sample_markdown_data
+                    # Run crawler asynchronously
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                    try:
+                        page_markdowns = loop.run_until_complete(self.research_crawler.start(url))
+                        all_page_markdowns.extend(page_markdowns)
+                        logger.debug(f"Crawled {len(page_markdowns)} pages from {url}")
+
+                    finally:
+                        loop.close()
+
+                except Exception as e:
+                    logger.error(f"Failed to crawl URL {url} for {profile.org_name}: {e}")
+                    continue
+
                 logger.info(f"Collected {len(all_page_markdowns)} total pages for {profile.org_name}")
                 
                 # Process the markdown content to extract enrichment data
-                all_page_markdowns=sample_markdown_data
                 partner_key_facts = self._extract_key_facts_from_markdown(profile, all_page_markdowns)
                 profile.key_facts=partner_key_facts
                 profile.outreach_draft_message=None
@@ -156,8 +152,7 @@ class ResearcherAgent:
             
         except Exception as e:
             logger.error(f"Error processing markdown content for {profile.org_name}: {e}")
-            return self._create_fallback_enrichment(profile)
-    
+
     def _extract_key_facts_from_page(self, page_markdown: PageMarkdown, org_name: str) -> List[str]:
         """
         Extract 1-3 key facts from a single page using LLM.

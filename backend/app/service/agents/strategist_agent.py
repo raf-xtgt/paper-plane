@@ -9,10 +9,9 @@ key facts, and maintain a professional yet casual tone.
 import os
 import logging
 import json
-from typing import Optional, List
-import vertexai
+from typing import List
 from vertexai.generative_models import GenerativeModel, GenerationConfig
-from app.model.lead_gen_model import PartnerDiscovery, PartnerEnrichment, OutreachDraft, PartnerProfile, PageKeyFact
+from app.model.lead_gen_model import OutreachDraft, PartnerProfile, PageKeyFact
 
 # Configure logging
 logger = logging.getLogger("lead_gen_pipeline.strategist")

@@ -18,7 +18,7 @@ async def extract_business_info(page, index=0):
 
     try:
         # Wait for the business card to load
-        await page.wait_for_selector('div[role="article"]', timeout=5000)
+        await page.wait_for_selector('div[role="article"]', timeout=5600)
         
         # Get the business card at the specified index
         business_card = page.locator('div[role="article"]').nth(index)
