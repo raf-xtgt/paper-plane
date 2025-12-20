@@ -14,13 +14,12 @@ router = APIRouter(
 lead_profile_service = LeadProfileService()
 
 @router.post("/create", response_model=PPLPartnerProfile)
-async def create_session(
-    session: PPLPartnerProfileCreate,
+async def create_partner_profile(
+    partner_profile: PPLPartnerProfileCreate,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Create a new session.
+    Create a new partner profile.
     """
-    print("new session")
-    return await lead_profile_service.create_lead_profile(db=db, session=session)
+    return await lead_profile_service.create_lead_profile(db=db, partner_profile=partner_profile)
 

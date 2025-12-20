@@ -118,7 +118,7 @@ class ScoutAgent:
         elif market == "Medical Tourism":
             queries = [
                 f"diagnostic centers {city}, {district}",
-                f"specialist clinics {city}, {district}",
+                # f"specialist clinics {city}, {district}",
                 # f"medical tourism {city}, {district}",
                 # f"expat health services {city}, {district}",
             ]
@@ -272,7 +272,7 @@ class ScoutAgent:
             all_scraped_data = []
             for query in queries:
                 logger.info(f"search query: {query} ")
-                scraped_data = await self._scrape_google_maps(query, max_results=7)
+                scraped_data = await self._scrape_google_maps(query, max_results=1)
                 all_scraped_data.extend(scraped_data)
             
             if not all_scraped_data:

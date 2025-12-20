@@ -8,10 +8,12 @@ asynchronously and returns immediately with a job identifier for tracking.
 import uuid
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import Depends, APIRouter, HTTPException
 from app.model.lead_gen_model import LeadGenRequest, LeadGenResponse, SearchQuery
 from app.service.agents.lead_gen_service import LeadGenPipeline
 from app.service.agents.scout.scout_agent_helper import scrape_google_maps
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.util.api.db_config import get_db
 
 # Configure logging
 logger = logging.getLogger("lead_gen_controller")
@@ -27,7 +29,7 @@ pipeline = LeadGenPipeline()
 
 
 @router.post("/lead-gen", response_model=LeadGenResponse)
-async def trigger_lead_generation(request: LeadGenRequest):
+async def trigger_lead_generation(request: LeadGenRequest, dbConn: AsyncSession = Depends(get_db)):
     """
     Trigger AI-powered lead generation pipeline for a specific city and market.
     
@@ -103,7 +105,8 @@ async def trigger_lead_generation(request: LeadGenRequest):
                 job_id=job_id,
                 city=request.city.strip(),
                 market=request.market,
-                district=request.district
+                district=request.district,
+                dbConn=dbConn
             )
         )
         

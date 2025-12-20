@@ -1,16 +1,14 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from app.model.api.ppl_lead_profile import PPLPartnerProfileCreate, PPLPartnerProfileDB
-import uuid
 
 class LeadProfileService:
-    async def create_lead_profile(self, db: AsyncSession, session: PPLPartnerProfileCreate) -> PPLPartnerProfileDB:
+    async def create_lead_profile(self, db: AsyncSession, partner_profile: PPLPartnerProfileCreate) -> PPLPartnerProfileDB:
         """
-        Creates a row in the database.
+        Creates a partner profile row in the database.
         """
-        db_session = PPLPartnerProfileDB(**session.dict())
-        db.add(db_session)
+        db_partner_profile = PPLPartnerProfileDB(**partner_profile.dict())
+        db.add(db_partner_profile)
         await db.commit()
-        await db.refresh(db_session)
-        return db_session
+        await db.refresh(db_partner_profile)
+        return db_partner_profile
 
