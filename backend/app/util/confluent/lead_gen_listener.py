@@ -67,21 +67,72 @@ class LeadGenListener:
         """
         try:
             # Extract relevant fields from the incoming lead_data structure
-            # The LeadObject expects fields like 'source_agent', 'market', 'city', etc.,
-            # directly, but the Kafka message nests these under a 'data' key.
             event_type = lead_data.get("event_type")
             timestamp_str = lead_data.get("timestamp")
             nested_data = lead_data.get("data", {})
             
-            # Combine top-level fields with the nested 'data' fields for Pydantic parsing
-            combined_data_for_pydantic = {
-                "event_type": event_type,
-                "timestamp": timestamp_str,
-                **nested_data # Unpack the nested data
-            }
+            # Extract partner_profile data from nested structure
+            partner_profile_data = nested_data.get("partner_profile", {})
             
-            # Parse Lead Object using Pydantic model for validation
-            lead = LeadObject(**combined_data_for_pydantic)
+            # Reconstruct the LeadObject with proper PartnerProfile structure
+            # We need to create the PartnerProfile object separately since it's nested in the Kafka message
+            from app.model.lead_gen_model import PartnerProfile, PageKeyFact, OutreachDraft
+            
+            # Handle key_facts reconstruction
+            key_facts = None
+            if partner_profile_data.get("key_facts"):
+                key_facts = []
+                for fact_data in partner_profile_data["key_facts"]:
+                    if isinstance(fact_data, str):
+                        # If it's just a string, create a minimal PageKeyFact
+                        key_facts.append(PageKeyFact(
+                            page_url="",
+                            markdown_content="",
+                            key_facts=[fact_data]
+                        ))
+                    elif isinstance(fact_data, list):
+                        # If it's a list of facts
+                        key_facts.append(PageKeyFact(
+                            page_url="",
+                            markdown_content="",
+                            key_facts=fact_data
+                        ))
+            
+            # Handle outreach_draft_message reconstruction
+            outreach_draft = None
+            if partner_profile_data.get("outreach_draft_message"):
+                outreach_draft = OutreachDraft(
+                    draft_message=partner_profile_data["outreach_draft_message"]
+                )
+            
+            # Create PartnerProfile object
+            partner_profile = PartnerProfile(
+                guid=partner_profile_data.get("guid"),
+                org_name=partner_profile_data.get("org_name"),
+                primary_contact=partner_profile_data.get("primary_contact"),
+                review_score=partner_profile_data.get("review_score"),
+                total_reviews=partner_profile_data.get("total_reviews"),
+                website_url=partner_profile_data.get("website_url"),
+                address=partner_profile_data.get("address"),
+                emails=partner_profile_data.get("emails"),
+                phone_numbers=partner_profile_data.get("phone_numbers"),
+                internal_urls=partner_profile_data.get("internal_urls"),
+                external_urls=partner_profile_data.get("external_urls"),
+                entity_type=partner_profile_data.get("entity_type"),
+                lead_phase=partner_profile_data.get("lead_phase"),
+                key_facts=key_facts,
+                outreach_draft_message=outreach_draft
+            )
+            
+            # Create LeadObject with reconstructed PartnerProfile
+            lead = LeadObject(
+                event_type=event_type,
+                timestamp=timestamp_str,
+                source_agent=nested_data.get("source_agent"),
+                market=nested_data.get("market"),
+                city=nested_data.get("city"),
+                partner_profile=partner_profile
+            )
             
             # Log received lead with partner name and city
             logger.info(
@@ -131,6 +182,14 @@ class LeadGenListener:
             async with AsyncSessionLocal() as db:
                 try:
                     # Map PartnerProfile from LeadObject to PPLPartnerProfileCreate
+                    # Handle key_facts flattening for database storage
+                    key_facts_for_db = None
+                    if lead.partner_profile.key_facts:
+                        key_facts_for_db = []
+                        for fact in lead.partner_profile.key_facts:
+                            if fact.key_facts:
+                                key_facts_for_db.extend(fact.key_facts)
+                    
                     partner_profile_create = PPLPartnerProfileCreate(
                         org_name=lead.partner_profile.org_name,
                         primary_contact=lead.partner_profile.primary_contact,
@@ -144,7 +203,7 @@ class LeadGenListener:
                         external_urls=lead.partner_profile.external_urls,
                         entity_type=lead.partner_profile.entity_type,
                         lead_phase=lead.partner_profile.lead_phase,
-                        key_facts=[fact.key_facts for fact in lead.partner_profile.key_facts] if lead.partner_profile.key_facts else None,
+                        key_facts=key_facts_for_db,
                         outreach_draft_message=lead.partner_profile.outreach_draft_message.draft_message if lead.partner_profile.outreach_draft_message else None,
                         user_guid=getattr(lead, 'user_guid', None)
                     )
