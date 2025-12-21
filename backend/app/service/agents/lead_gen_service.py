@@ -19,7 +19,8 @@ from app.util.confluent.lead_gen_producer import LeadGenProducer
 from app.model.lead_gen_model import (
     PartnerProfile,
     PartnerContact,
-    ScrapedBusinessData
+    ScrapedBusinessData,
+    LeadObject
 )
 from app.model.api.ppl_lead_profile import PPLPartnerProfileDB
 from app.util.api.db_config import get_db
@@ -93,7 +94,6 @@ class LeadGenPipeline:
         )
         
         start_time = datetime.utcnow()
-        lead_objects = []
         
         try:
             # Step 1: Scout Agent - Discover partners
@@ -102,7 +102,15 @@ class LeadGenPipeline:
             #
             # Run Scout agent (now async) - returns ScrapedBusinessData
             # scraped_data = await self.scout.discover_partners(city, market, district)
-            scraped_data = [ScrapedBusinessData(guid='cfa12f0e-14aa-4d9a-aba0-f7272b46c60a', org_name='Optimum Diagnostic Imaging', primary_contact='+1 973-521-5685', review_score='৪.৪', total_reviews='৯১', website_url='https://odinj.com/', address='243 Chestnut St')]
+            scraped_data = [ScrapedBusinessData(
+                guid="11205454-4c4f-4c20-93f0-825e45cbe76d",
+                org_name="UIC Medical Centre - Dr. Saurabh Patel",
+                primary_contact="+1 973-344-2929",
+                review_score="৪.২",
+                total_reviews="৮০",
+                website_url="https://uicmedcentre.com/",
+                address="99 Madison St",
+            )]
             scout_duration = (datetime.utcnow() - scout_start).total_seconds()
             logger.info(
                 f"Scout Agent complete - found {len(scraped_data)} partners "
@@ -190,7 +198,7 @@ class LeadGenPipeline:
 
             strategist_duration = (datetime.utcnow() - strategist_start).total_seconds()
             logger.info(
-                f"Strategist Agent complete - generated {len(lead_objects)} drafts "
+                f"Strategist Agent complete - generated {len(profiles_with_outreach)} drafts "
                 f"in {strategist_duration:.2f}s"
             )
             
@@ -200,7 +208,7 @@ class LeadGenPipeline:
                 f"Pipeline execution complete - "
                 f"city: {city}, market: {market}, "
                 f"total_duration: {total_duration:.2f}s, "
-                f"leads_generated: {len(lead_objects)}, "
+                f"leads_generated: {len(profiles_with_outreach)}, "
                 f"scout: {scout_duration:.2f}s, "
                 f"navigator: {navigator_duration:.2f}s, "
                 f"researcher: {researcher_duration:.2f}s, "
@@ -215,8 +223,7 @@ class LeadGenPipeline:
                 f"Pipeline timeout exceeded - "
                 f"city: {city}, market: {market}, "
                 f"timeout: {self.pipeline_timeout}s, "
-                f"duration: {duration:.2f}s, "
-                f"partial_results: {len(lead_objects)} leads"
+                f"duration: {duration:.2f}s"
             )
             # Return partial results if any
             return []
@@ -233,7 +240,7 @@ class LeadGenPipeline:
             # Return partial results if any
             return []
     
-    async def run_async(self, job_id: str, city: str, market: str, district:str, dbConn:AsyncSession):
+    async def run_async(self, job_id: str, city: str, market: str, district:str):
         """
         Background task wrapper for async pipeline execution.
         
@@ -255,14 +262,14 @@ class LeadGenPipeline:
         
         try:
             # Execute pipeline with timeout
-            lead_objects = await asyncio.wait_for(
+            lead_profiles = await asyncio.wait_for(
                 self.execute(city, market, district),
                 timeout=self.pipeline_timeout
             )
             
             duration = (datetime.utcnow() - start_time).total_seconds()
             
-            if not lead_objects:
+            if not lead_profiles:
                 logger.warning(
                     f"Pipeline completed with no leads - "
                     f"job_id: {job_id}, city: {city}, market: {market}, "
@@ -273,12 +280,49 @@ class LeadGenPipeline:
             logger.info(
                 f"Pipeline completed successfully - "
                 f"job_id: {job_id}, city: {city}, market: {market}, "
-                f"leads: {len(lead_objects)}, duration: {duration:.2f}s"
+                f"leads: {len(lead_profiles)}, duration: {duration:.2f}s"
             )
+
+            logger.info(
+                f"Publishing {len(lead_profiles)} leads to Kafka - "
+                f"job_id: {job_id}, topic: lead_generated"
+            )
+
+            publish_start = datetime.utcnow()
+            success_count = 0
+            failure_count = 0
+
+            for profile in lead_profiles:
+                # Map PartnerProfile to LeadObject
+                lead = LeadObject(
+                    market=market,
+                    city=city,
+                    partner_profile=profile
+                )
+                
+                try:
+                    published = await self.lead_producer.publish_lead(lead)
+                    if published:
+                        success_count += 1
+                    else:
+                        failure_count += 1
+                except Exception as e:
+                    logger.error(
+                        f"Failed to publish lead '{profile.org_name}' - "
+                        f"job_id: {job_id}, error: {str(e)}",
+                        exc_info=True
+                    )
+                    failure_count += 1
+
+            # Flush producer to ensure all messages are sent
+            self.lead_producer.flush()
             
-            # Save lead objects to database
-            await self._save_leads_to_database(lead_objects, dbConn)
-            logger.info(f"Successfully saved {len(lead_objects)} leads to database")
+            publish_duration = (datetime.utcnow() - publish_start).total_seconds()
+            logger.info(
+                f"Kafka publishing complete - "
+                f"job_id: {job_id}, success: {success_count}, "
+                f"failures: {failure_count}, duration: {publish_duration:.2f}s"
+            )
             
 
             
@@ -428,52 +472,3 @@ class LeadGenPipeline:
         else:
             return "Business"
 
-    async def _save_leads_to_database(self, lead_objects: List[PartnerProfile], dbConn: AsyncSession) -> None:
-        """
-        Save PartnerProfile objects to the database.
-        
-        Args:
-            lead_objects: List of PartnerProfile objects to save
-        """
-        if not lead_objects:
-            logger.info("No leads to save to database")
-            return
-            
-        logger.info(f"Saving {len(lead_objects)} leads to database")
-        
-
-        saved_count = 0
-        for partner_profile in lead_objects:
-            try:
-                # Convert PartnerProfile to database model
-                db_partner_profile = PPLPartnerProfileDB(
-                    guid=partner_profile.guid,
-                    org_name=partner_profile.org_name,
-                    primary_contact=partner_profile.primary_contact,
-                    review_score=partner_profile.review_score,
-                    total_reviews=partner_profile.total_reviews,
-                    website_url=partner_profile.website_url,
-                    address=partner_profile.address,
-                    emails=partner_profile.emails,
-                    phone_numbers=partner_profile.phone_numbers,
-                    internal_urls=partner_profile.internal_urls,
-                    external_urls=partner_profile.external_urls,
-                    entity_type=partner_profile.entity_type,
-                    lead_phase=partner_profile.lead_phase,
-                    key_facts=partner_profile.key_facts,
-                    outreach_draft_message=partner_profile.outreach_draft_message.draft_message if partner_profile.outreach_draft_message else None,
-                    user_guid=None  # Set to None or get from context if available
-                )
-                        
-                dbConn.add(db_partner_profile)
-                saved_count += 1
-
-                # Commit all changes
-                await dbConn.commit()
-                await dbConn.refresh(db_partner_profile)
-                logger.info(f"Successfully saved {saved_count} partner profiles to database")
-                
-            except Exception as e:
-                logger.error(f"Database transaction failed: {str(e)}")
-                await dbConn.rollback()
-                raise

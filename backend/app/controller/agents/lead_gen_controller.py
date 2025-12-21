@@ -106,7 +106,6 @@ async def trigger_lead_generation(request: LeadGenRequest, dbConn: AsyncSession 
                 city=request.city.strip(),
                 market=request.market,
                 district=request.district,
-                dbConn=dbConn
             )
         )
         

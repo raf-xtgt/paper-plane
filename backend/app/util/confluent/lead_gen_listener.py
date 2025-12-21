@@ -85,36 +85,39 @@ class LeadGenListener:
             
             # Log received lead with partner name and city
             logger.info(
-                f"Lead received: {lead.partner_profile.name} in {lead.city} "
+                f"Lead received: {lead.partner_profile.org_name} in {lead.city} "
                 f"(Market: {lead.market})"
             )
             
             # Log additional details at debug level
             logger.debug(
-                f"Lead details - Contact: {lead.partner_profile.contact_person}, "
-                f"Method: {lead.partner_profile.contact_method}, "
-                f"Insight: {lead.ai_context.key_insight}"
+                f"Lead details - Entity: {lead.partner_profile.entity_type}, "
+                f"Website: {lead.partner_profile.website_url}, "
+                f"Phase: {lead.partner_profile.lead_phase}"
             )
             
             # Prepare data structure for dashboard notification
             # This is a future integration point for the dashboard UI
             dashboard_notification = {
                 "notification_type": "new_lead",
-                "lead_id": f"{lead.city}_{lead.partner_profile.name}_{lead.timestamp.isoformat()}",
+                "lead_id": f"{lead.city}_{lead.partner_profile.org_name}_{lead.timestamp.isoformat()}",
                 "timestamp": lead.timestamp.isoformat(),
                 "summary": {
-                    "partner_name": lead.partner_profile.name,
+                    "partner_name": lead.partner_profile.org_name,
                     "city": lead.city,
                     "market": lead.market,
-                    "contact_person": lead.partner_profile.contact_person,
-                    "entity_type": lead.partner_profile.entity_type
+                    "entity_type": lead.partner_profile.entity_type,
+                    "lead_phase": lead.partner_profile.lead_phase
                 },
                 "details": {
-                    "website": str(lead.partner_profile.url),
-                    "contact_method": lead.partner_profile.contact_method,
-                    "contact_channel": lead.partner_profile.contact_channel,
-                    "key_insight": lead.ai_context.key_insight,
-                    "draft_message": lead.ai_context.draft_message
+                    "website": lead.partner_profile.website_url,
+                    "address": lead.partner_profile.address,
+                    "primary_contact": lead.partner_profile.primary_contact,
+                    "emails": lead.partner_profile.emails,
+                    "phone_numbers": lead.partner_profile.phone_numbers,
+                    "review_score": lead.partner_profile.review_score,
+                    "total_reviews": lead.partner_profile.total_reviews,
+                    "outreach_draft": lead.partner_profile.outreach_draft_message.draft_message if lead.partner_profile.outreach_draft_message else None
                 },
                 "actions": [
                     {"type": "edit", "label": "Edit Message"},
@@ -127,42 +130,31 @@ class LeadGenListener:
             # Persist to database
             async with AsyncSessionLocal() as db:
                 try:
-                    # Create partner profile
+                    # Map PartnerProfile from LeadObject to PPLPartnerProfileCreate
                     partner_profile_create = PPLPartnerProfileCreate(
-                        name=lead.partner_profile.name,
-                        url=str(lead.partner_profile.url) if lead.partner_profile.url else None,
-                        contact_person=lead.partner_profile.contact_person,
-                        contact_method=lead.partner_profile.contact_method,
-                        contact_channel=lead.partner_profile.contact_channel,
+                        org_name=lead.partner_profile.org_name,
+                        primary_contact=lead.partner_profile.primary_contact,
+                        review_score=lead.partner_profile.review_score,
+                        total_reviews=lead.partner_profile.total_reviews,
+                        website_url=lead.partner_profile.website_url,
+                        address=lead.partner_profile.address,
+                        emails=lead.partner_profile.emails,
+                        phone_numbers=lead.partner_profile.phone_numbers,
+                        internal_urls=lead.partner_profile.internal_urls,
+                        external_urls=lead.partner_profile.external_urls,
                         entity_type=lead.partner_profile.entity_type,
-                        user_guid=lead.user_guid if hasattr(lead, 'user_guid') else None
+                        lead_phase=lead.partner_profile.lead_phase,
+                        key_facts=[fact.key_facts for fact in lead.partner_profile.key_facts] if lead.partner_profile.key_facts else None,
+                        outreach_draft_message=lead.partner_profile.outreach_draft_message.draft_message if lead.partner_profile.outreach_draft_message else None,
+                        user_guid=getattr(lead, 'user_guid', None)
                     )
                     
                     db_partner_profile = await self.lead_profile_service.create_lead_profile(
                         db, partner_profile_create
                     )
                     logger.info(f"Partner profile created: {db_partner_profile.guid}")
-                    
-                    # Create generated lead
-                    generated_lead_create = PPLGeneratedLeadCreate(
-                        partner_profile_guid=db_partner_profile.guid,
-                        user_guid=lead.user_guid if hasattr(lead, 'user_guid') else db_partner_profile.guid,
-                        market=lead.market,
-                        city=lead.city,
-                        source_agent=lead.source_agent,
-                        key_insight=lead.ai_context.key_insight,
-                        draft_message=lead.ai_context.draft_message,
-                        notification_data=dashboard_notification,
-                        status="pending"
-                    )
-                    
-                    db_generated_lead = await self.generated_lead_service.create_generated_lead(
-                        db, generated_lead_create
-                    )
-                    logger.info(f"Generated lead created: {db_generated_lead.guid}")
-                    
+
                     # Update dashboard notification with database GUIDs
-                    dashboard_notification["lead_id"] = str(db_generated_lead.guid)
                     dashboard_notification["partner_profile_guid"] = str(db_partner_profile.guid)
                     
                 except Exception as db_error:

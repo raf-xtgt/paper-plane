@@ -117,7 +117,7 @@ class LeadGenProducer:
         Returns:
             True if published successfully, False if all retries failed
         """
-        partner_name = lead.partner_profile.name
+        partner_name = lead.partner_profile.org_name
         message = self.format_message(lead)
         
         for attempt in range(1, self.max_retries + 1):

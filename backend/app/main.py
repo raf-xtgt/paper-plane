@@ -55,14 +55,14 @@ async def lifespan(app: FastAPI):
     # Start Consumers in background tasks
     task_in = asyncio.create_task(consume_inbound())
     task_out = asyncio.create_task(consume_outbound())
-    # task_lead_gen = asyncio.create_task(lead_gen_listener.start())
+    task_lead_gen = asyncio.create_task(lead_gen_listener.start())
     
     yield
     
     # Clean up tasks on shutdown
     task_in.cancel()
     task_out.cancel()
-    # task_lead_gen.cancel()
+    task_lead_gen.cancel()
     
     # Wait for tasks to complete cancellation
     try:
@@ -75,10 +75,10 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         pass
     
-    # try:
-    #     await task_lead_gen
-    # except asyncio.CancelledError:
-    #     pass
+    try:
+        await task_lead_gen
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(title="Omni Channel Service", lifespan=lifespan)
 
