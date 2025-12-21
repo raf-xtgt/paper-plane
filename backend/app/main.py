@@ -1,19 +1,14 @@
-from dotenv import load_dotenv
-import os
 import logging
-from fastapi.middleware.cors import CORSMiddleware
 import vertexai
-import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
 from app.util.confluent import *
 from app.util.confluent.lead_gen_listener import lead_gen_listener
 from app.controller import twilio
 from app.controller import agents
-
+from app.controller import lead_profile
 
 load_dotenv()
 
@@ -95,6 +90,7 @@ app.add_middleware(
 url_prefix = "/api/ppl"
 app.include_router(twilio.router, prefix=url_prefix)
 app.include_router(agents.router, prefix=url_prefix)
+app.include_router(lead_profile.router, prefix=url_prefix)
 
 
 

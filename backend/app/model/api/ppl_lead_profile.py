@@ -48,6 +48,12 @@ class PPLPartnerProfileBase(BaseModel):
 class PPLPartnerProfileCreate(PPLPartnerProfileBase):
     pass
 
+class PPLPartnerProfileUpdate(PPLPartnerProfileBase):
+    """
+    Model for updating partner profiles - all fields are optional
+    """
+    pass
+
 class PPLPartnerProfile(PPLPartnerProfileBase):
     guid: uuid.UUID
     created_date: datetime
