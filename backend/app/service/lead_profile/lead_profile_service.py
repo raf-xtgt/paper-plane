@@ -75,36 +75,23 @@ class LeadProfileService:
         await db.commit()
         return True
 
-    async def stream_lead_profiles(self, db: AsyncSession, user_guid: Optional[uuid.UUID] = None, batch_size: int = 50) -> AsyncGenerator[List[PPLPartnerProfileDB], None]:
-        """
-        Streams partner profiles in batches for efficient processing.
-        If user_guid is provided, filters by user. Otherwise returns all profiles.
-        """
-        offset = 0
-        
-        while True:
-            query = select(PPLPartnerProfileDB).order_by(PPLPartnerProfileDB.created_date.desc())
-            
-            if user_guid:
-                query = query.where(PPLPartnerProfileDB.user_guid == user_guid)
-            
-            query = query.limit(batch_size).offset(offset)
-            
-            result = await db.execute(query)
-            batch = result.scalars().all()
-            
-            if not batch:
-                break
-                
-            yield batch
-            offset += batch_size
 
-    async def get_all_lead_profiles(self, db: AsyncSession, user_guid: Optional[uuid.UUID] = None) -> List[PPLPartnerProfileDB]:
+    async def get_lead_profiles_list(self, db: AsyncSession, limit: Optional[int] = None, offset: int = 0) -> List[PPLPartnerProfileDB]:
         """
-        Convenience method to get all profiles at once (use with caution for large datasets).
+        Returns a list of partner profiles with optional filtering and pagination.
+        
+        Args:
+            db: Database session
+            user_guid: Optional user GUID to filter by
+            limit: Optional limit for number of results
+            offset: Offset for pagination (default: 0)
+            
+        Returns:
+            List of PPLPartnerProfileDB objects
         """
-        all_profiles = []
-        async for batch in self.stream_lead_profiles(db, user_guid):
-            all_profiles.extend(batch)
-        return all_profiles
+        result = await db.execute(
+            select(PPLPartnerProfileDB)
+            .order_by(PPLPartnerProfileDB.created_date.desc())
+        )
+        return result.scalars().all()
 
