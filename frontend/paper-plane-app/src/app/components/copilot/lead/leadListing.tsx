@@ -17,7 +17,7 @@ export default function LeadListing() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const { user } = useUser();
-  const { setCurrentSessionGuid } = useStateController();
+  const { setSelectedLead, setIsLeadViewOpen } = useStateController();
 
   // Load leadProfiles on component mount
   useEffect(() => {
@@ -107,7 +107,9 @@ export default function LeadListing() {
                   : 'bg-white border border-gray-200 hover:bg-gray-50'
                   }`}
                 onClick={() => {
-                  setSelectedLeadProfile(profile); // 🔹 store selected Session
+                  setSelectedLeadProfile(profile);
+                  setSelectedLead(profile);
+                  setIsLeadViewOpen(true);
                 }}
               >
                 <div className="flex-1 min-w-0">
