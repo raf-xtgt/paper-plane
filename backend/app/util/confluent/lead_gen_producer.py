@@ -63,6 +63,19 @@ class LeadGenProducer:
             Dictionary containing formatted message with event_type,
             timestamp, and nested data fields
         """
+        # Extract key facts as strings if available
+        key_facts_list = []
+        if lead.partner_profile.key_facts:
+            key_facts_list = [fact.key_facts for fact in lead.partner_profile.key_facts if fact.key_facts]
+            # Flatten the list if it contains nested lists
+            flattened_facts = []
+            for facts in key_facts_list:
+                if isinstance(facts, list):
+                    flattened_facts.extend(facts)
+                else:
+                    flattened_facts.append(facts)
+            key_facts_list = flattened_facts
+        
         message = {
             "event_type": lead.event_type,
             "timestamp": lead.timestamp.isoformat(),
@@ -71,15 +84,21 @@ class LeadGenProducer:
                 "market": lead.market,
                 "city": lead.city,
                 "partner_profile": {
-                    "name": lead.partner_profile.name,
-                    "url": str(lead.partner_profile.url),
-                    "contact_person": lead.partner_profile.contact_person,
-                    "contact_method": lead.partner_profile.contact_method,
-                    "entity_type": lead.partner_profile.entity_type
-                },
-                "ai_context": {
-                    "key_insight": lead.ai_context.key_insight,
-                    "draft_message": lead.ai_context.draft_message
+                    "guid": lead.partner_profile.guid,
+                    "org_name": lead.partner_profile.org_name,
+                    "primary_contact": lead.partner_profile.primary_contact,
+                    "review_score": lead.partner_profile.review_score,
+                    "total_reviews": lead.partner_profile.total_reviews,
+                    "website_url": lead.partner_profile.website_url,
+                    "address": lead.partner_profile.address,
+                    "emails": lead.partner_profile.emails,
+                    "phone_numbers": lead.partner_profile.phone_numbers,
+                    "internal_urls": lead.partner_profile.internal_urls,
+                    "external_urls": lead.partner_profile.external_urls,
+                    "entity_type": lead.partner_profile.entity_type,
+                    "lead_phase": lead.partner_profile.lead_phase,
+                    "key_facts": key_facts_list,
+                    "outreach_draft_message": lead.partner_profile.outreach_draft_message.draft_message if lead.partner_profile.outreach_draft_message else None
                 }
             }
         }
@@ -117,7 +136,7 @@ class LeadGenProducer:
         Returns:
             True if published successfully, False if all retries failed
         """
-        partner_name = lead.partner_profile.org_name
+        partner_name = lead.partner_profile.org_name or "Unknown Partner"
         message = self.format_message(lead)
         
         for attempt in range(1, self.max_retries + 1):
@@ -179,7 +198,7 @@ class LeadGenProducer:
         """
         try:
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-            partner_slug = lead.partner_profile.name.replace(" ", "_").lower()
+            partner_slug = (lead.partner_profile.org_name or "unknown_partner").replace(" ", "_").lower()
             filename = f"lead_{timestamp}_{partner_slug}.json"
             filepath = self.fallback_dir / filename
             
@@ -188,13 +207,13 @@ class LeadGenProducer:
                 json.dump(message, f, indent=2)
             
             logger.info(
-                f"Lead '{lead.partner_profile.name}' written to fallback queue: "
+                f"Lead '{lead.partner_profile.org_name or 'Unknown Partner'}' written to fallback queue: "
                 f"{filepath}"
             )
             
         except Exception as e:
             logger.error(
-                f"Failed to write lead '{lead.partner_profile.name}' to "
+                f"Failed to write lead '{lead.partner_profile.org_name or 'Unknown Partner'}' to "
                 f"fallback queue: {e}. Full lead data: {message}"
             )
     
