@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { FaArrowLeft, FaEdit, FaTimes } from 'react-icons/fa';
 import { useStateController } from '@/app/context/stateController';
+import { MsgService } from '@/app/services/msgService';
 
 export default function LeadView() {
   const { selectedLead, setIsLeadViewOpen } = useStateController();
@@ -29,10 +30,27 @@ export default function LeadView() {
     setIsLeadViewOpen(false);
   };
 
-  const handleApproveAndSend = () => {
-    // Handle approve and send logic
-    console.log('Approving and sending message for lead:', selectedLead?.guid);
-    console.log('Message:', outreachMessage);
+  const handleApproveAndSend = async () => {
+    try {
+      // Prepare the payload with hardcoded phone number for now
+      const payload = {
+        to_number: "whatsapp:+8801326237828",
+        message_body: outreachMessage
+      };
+
+      console.log('Approving and sending message for lead:', selectedLead?.guid);
+      console.log('Payload:', payload);
+
+      // Call the sendMessage service
+      const response = await MsgService.sendMessage(payload);
+      console.log('Message sent successfully:', response);
+      
+      // Optionally close the lead view or show success message
+      // setIsLeadViewOpen(false);
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Handle error - could show a toast notification or error message
+    }
   };
 
   const handleSendLater = () => {
